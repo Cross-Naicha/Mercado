@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mercado domestico</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+
+    <!-- Tabla -->
+    <h1>Productos</h1>
+
+    <!-- Buscador -->
+    <input type="text" id="search" name="search" placeholder="Buscar producto..." oninput="read_products()">
+    <button type="button" onclick="reset_form()">Limpiar</button>
+    <br><br>
+
+    <table>
+        <tbody id="data">
+            <!-- Aquí se insertarán los datos -->
+        </tbody>
+    </table>
+
+    <!-- Comparar -->
+    <h1 id="compare-section">Comparar</h1>
+
+    Nuevo precio <input type="number" id="new_price">
+    <input type="checkbox" id="checkbox_new_price_9_99" checked>9,99
+    <br><br>
+    Nueva presentacion <input type="number" id="new_presentation">
+    
+    <br>
+    <input type="radio" name="promotion" id="2x1">
+    <label>2x1</label>
+    
+    <input type="radio" name="promotion" id="3x2">
+    <label>3x2</label>
+    
+    <input type="radio" name="promotion" id="4x3">
+    <label>4x3</label>
+
+    <br>
+    <input type="radio" name="promotion" id="2_50%">
+    <label>2da al 50%</label>
+
+    <input type="radio" name="promotion" id="2_80%">
+    <label>2da al 80%</label>
+
+    <br>
+    <button type="button" onclick="clean_promotions()">Limpiar</button>
+    <br><br>
+    
+    <button type="button" onclick="compare_prices()">Comparar</button>
+    
+    <div id="comparison_result"></div>
+
+    <!-- Instancias -->
+    <h1>Instancia</h1>
+    <form>
+
+        <label>Product_id </label>
+        <input type="int" id="product_id" name="product_id">
+
+        <br><br>
+
+        <label>Price </label>
+        <span id="span_price"></span>
+        <input type="float" id="price" name="price">
+        
+        <input type="checkbox" id="checkbox_99" checked>
+        <label for="checkbox_99">9,99</label>
+        <input type="checkbox" id="checkbox_is_promotion">
+        <label for="checkbox_is_promotion">Promoción</label>
+        
+        <br><br>
+
+        <label>Market </label>
+        <input type="text" id="market" name="market">
+        
+        <input type="checkbox" id="checkbox_market" checked>
+        <label for="checkbox_market">Mantener</label>
+
+        <br><br>
+
+        <button type="button" onclick="save_instance_form()">Enviar</button>
+        <input type="number" id="quantity" value="1">
+        <input type="checkbox" id="checkbox_quantity_1_1000">
+        <label for="checkbox_quantity_1_1000">1/1000</label>
+
+    </form>
+
+    <!-- Registro -->
+    <h1>Registro</h1>
+
+    <input type="checkbox" id="checkbox_product" onchange="another_similar_product()" checked>
+    <label for="checkbox_product">Producto</label>
+
+    <input type="checkbox" id="checkbox_brand" onchange="another_similar_product()" checked>
+    <label for="checkbox_brand">Marca</label>
+
+    <input type="checkbox" id="checkbox_ptype" onchange="another_similar_product()" checked>
+    <label for="checkbox_ptype">Tipo</label>
+
+    <input type="checkbox" id="checkbox_psubtype" onchange="another_similar_product()" checked>
+    <label for="checkbox_psubtype">Subtipo</label>
+
+    <input type="checkbox" id="checkbox_presentation" onchange="another_similar_product()" checked>
+    <label for="checkbox_presentation">Presentación</label>
+    <br><br>
+
+    <form>
+
+        <label>Product </label>
+        <input type="text" id="product" name="product">
+
+        <br><br>
+
+        <label>Brand </label>
+        <input type="text" id="brand" name="brand">
+
+        <br><br>
+
+        <label>Type </label>
+        <input type="text" id="ptype" name="ptype">
+
+        <br><br>
+
+        <label>Subtype </label>
+        <input type="text" id="psubtype" name="psubtype">
+
+        <br><br>
+
+        <label>Presentation </label>
+        <input type="number" id="presentation" name="presentation">
+        
+        <input type="checkbox" id="checkbox_presentation_1_1000">
+        <label for="checkbox_presentation_1_1000">1/1000</label>
+
+        <br><br>
+
+        <button type="button" onclick="save_product_form()">Enviar</button>
+
+    </form>
+
+</body>
+
+<script src="js/main.js"></script>
+
+</html>
