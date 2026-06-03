@@ -9,22 +9,43 @@
 
 <body>
 
+    <div id="navbar">
+        <button onclick="document.getElementById('search_section').scrollIntoView({behavior:'smooth'})">
+            Productos
+        </button>
+
+        <button onclick="document.getElementById('compare_section').scrollIntoView({behavior:'smooth'})">
+            Comparar
+        </button>
+
+        <button onclick="document.getElementById('instances_section').scrollIntoView({behavior:'smooth'})">
+            Instancias
+        </button>
+
+        <button onclick="document.getElementById('register_section').scrollIntoView({behavior:'smooth'})">
+            Nuevo Producto
+        </button>
+    </div>
+
     <!-- Tabla -->
-    <h1>Productos</h1>
+    <h1 id="search_section" class="section">Productos</h1>
 
     <!-- Buscador -->
     <input type="text" id="search" name="search" placeholder="Buscar producto..." oninput="read_products()">
     <button type="button" onclick="reset_form()">Limpiar</button>
     <br><br>
 
+    <!-- Filtros de la tabla -->
+    <div id="filters"></div>
+
     <table>
-        <tbody id="data">
+        <tbody id="data_table">
             <!-- Aquí se insertarán los datos -->
         </tbody>
     </table>
 
     <!-- Comparar -->
-    <h1 id="compare-section">Comparar</h1>
+    <h1 id="compare_section" class="section">Comparar</h1>
 
     Nuevo precio <input type="number" id="new_price">
     <input type="checkbox" id="checkbox_new_price_9_99" checked>9,99
@@ -57,7 +78,7 @@
     <div id="comparison_result"></div>
 
     <!-- Instancias -->
-    <h1>Instancia</h1>
+    <h1 id="instances_section" class="section">Instancia</h1>
     <form>
 
         <label>Product_id </label>
@@ -92,7 +113,7 @@
     </form>
 
     <!-- Registro -->
-    <h1>Registro</h1>
+    <h1 id="register_section" class="section">Registro</h1>
 
     <input type="checkbox" id="checkbox_product" onchange="another_similar_product()" checked>
     <label for="checkbox_product">Producto</label>

@@ -23,10 +23,25 @@ html {
     background: var(--bg);
 }
 
+#navbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    background-color: white;
+    padding: 10px;
+    border-bottom: 1px solid #ccc;
+    z-index: 1000;
+}
+
+#navbar a {
+    margin-right: 15px;
+}
+
 body {
     width: min(1120px, calc(100% - 32px));
     margin: 0 auto;
-    padding: 32px 0 48px;
+    padding: 92px 0 48px;
     color: var(--text);
     background:
         linear-gradient(135deg, rgba(22, 112, 95, 0.08), transparent 34rem),
@@ -181,6 +196,10 @@ table button:hover,
 button[onclick="reset_form()"]:hover,
 button[onclick="clean_promotions()"]:hover {
     background: #dfece7;
+}
+
+.section {
+    scroll-margin-top: 80px;
 }
 
 #comparison_result:not(:empty) {

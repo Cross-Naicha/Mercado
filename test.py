@@ -23,6 +23,7 @@ cursor, connection = functions.connect_to_database()
 
 class Product(BaseModel):
     product: str
+    pclass: str | None = None
     brand: str
     ptype: str | None = None
     psubtype: str | None = None

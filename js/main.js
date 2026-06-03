@@ -1,5 +1,4 @@
 // Variables
-
 let selected_id = null;
 let selected_product = null;
 let selected_brand = null;
@@ -9,7 +8,18 @@ let selected_presentation = null;
 let selected_normal_price = null;
 let selected_normal_unit = null;
 
+let selected_class_filter = null;
+
 // Funciones
+
+window.onload = async function() {
+
+    await read_products();
+
+    document.getElementById("search_section")
+        .scrollIntoView();
+
+};
 
 async function read_products() {
     
@@ -18,11 +28,43 @@ async function read_products() {
     const response = await fetch("/get_products");
     const data = await response.json();
 
-    const container = document.getElementById("data");
+    // Generacion de los filtros de busqueda
+    let filter_class = new Set();
+
+    for (const filter of data) {
+        filter_class.add(filter.product_class);
+    }
+
+    const filters_container = document.getElementById("filters");
+    filters_container.innerHTML = "";
+
+    filters_container.innerHTML += `
+        <label>
+            <button onclick="apply_class_filter(null)">Todos</button>
+        </label>
+    `;
+    
+    for (const filter of filter_class) {
+        filters_container.innerHTML += `
+            <label>
+                <button onclick="apply_class_filter('${filter}')">${filter}</button>
+            </label>
+            `;
+    }
+    
+    // Generacion de la tabla
+    const container = document.getElementById("data_table");
     container.innerHTML = "";
 
     for (const product of data) {
         
+        if (
+            selected_class_filter !== null &&
+            product.product_class !== selected_class_filter
+        ) {
+            continue;
+        }
+
         if (
             !product.product_all
                 .toLowerCase()
@@ -56,6 +98,11 @@ async function read_products() {
     }
 }
 
+function apply_class_filter(filter) {
+    selected_class_filter = filter;
+    read_products();
+}
+
 function select_product(id, product_all, product_name, product_brand, product_ptype, product_psubtype, normal_price, normal_unit, presentation) {
 
     selected_id = id;
@@ -78,7 +125,7 @@ function select_product(id, product_all, product_name, product_brand, product_pt
     document.getElementById("span_price").textContent =
     ` - $${Number(selected_normal_price).toFixed(2)} -`;
 
-    document.getElementById("compare_sector").scrollIntoView({ behavior: "smooth" });
+    document.getElementById("compare-section").scrollIntoView({ behavior: "smooth" });
 
 }
 
