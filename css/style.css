@@ -1,17 +1,20 @@
 :root {
     color-scheme: light;
-    --bg: #f6f7f4;
+    --bg: #f4f6f3;
     --surface: #ffffff;
-    --surface-soft: #eef5f1;
-    --text: #202721;
-    --muted: #657065;
-    --line: #d9e1d7;
-    --primary: #16705f;
-    --primary-dark: #0f574b;
-    --accent: #d98832;
-    --focus: rgba(22, 112, 95, 0.2);
-    --shadow: 0 14px 40px rgba(43, 62, 49, 0.12);
-    font-family: Inter, "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    --surface-soft: #edf4ef;
+    --surface-warm: #fff7ec;
+    --text: #1f2823;
+    --muted: #68746d;
+    --line: #dce5dd;
+    --primary: #0f7a66;
+    --primary-dark: #09584a;
+    --accent: #c7782e;
+    --danger-soft: #f7e9de;
+    --focus: rgba(15, 122, 102, 0.22);
+    --shadow: 0 12px 30px rgba(31, 40, 35, 0.12);
+    --radius: 8px;
+    font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
 * {
@@ -20,110 +23,186 @@
 
 html {
     min-height: 100%;
+    scroll-behavior: smooth;
     background: var(--bg);
+}
+
+body {
+    max-width: 760px;
+    min-height: 100vh;
+    margin: 0 auto;
+    padding: 18px 12px 104px;
+    color: var(--text);
+    background:
+        linear-gradient(180deg, rgba(15, 122, 102, 0.08), transparent 220px),
+        var(--bg);
+    font-size: 16px;
+    line-height: 1.45;
+    -webkit-tap-highlight-color: transparent;
 }
 
 #navbar {
     position: fixed;
-    top: 0;
+    right: 0;
+    bottom: 0;
     left: 0;
-    width: 100%;
-    background-color: white;
-    padding: 10px;
-    border-bottom: 1px solid #ccc;
     z-index: 1000;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+    padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+    border-top: 1px solid rgba(220, 229, 221, 0.95);
+    background: rgba(255, 255, 255, 0.94);
+    box-shadow: 0 -12px 28px rgba(31, 40, 35, 0.13);
+    backdrop-filter: blur(14px);
 }
 
-#navbar a {
-    margin-right: 15px;
+#navbar button {
+    min-height: 52px;
+    margin: 0;
+    padding: 8px 6px;
+    border-radius: var(--radius);
+    background: transparent;
+    color: var(--muted);
+    box-shadow: none;
+    font-size: 0.78rem;
+    font-weight: 800;
+    line-height: 1.1;
 }
 
-body {
-    width: min(1120px, calc(100% - 32px));
-    margin: 0 auto;
-    padding: 92px 0 48px;
-    color: var(--text);
-    background:
-        linear-gradient(135deg, rgba(22, 112, 95, 0.08), transparent 34rem),
-        linear-gradient(315deg, rgba(217, 136, 50, 0.12), transparent 30rem),
-        var(--bg);
-    line-height: 1.5;
+#navbar button:hover,
+#navbar button:focus-visible {
+    background: var(--surface-soft);
+    color: var(--primary-dark);
+    transform: none;
 }
 
 h1 {
-    margin: 28px 0 14px;
+    margin: 28px 0 12px;
     color: var(--text);
-    font-size: clamp(1.35rem, 2vw, 1.85rem);
-    font-weight: 750;
+    font-size: 1.55rem;
+    font-weight: 800;
+    letter-spacing: 0;
 }
 
 h1:first-of-type {
     margin-top: 0;
-    font-size: clamp(2rem, 4vw, 3rem);
+    font-size: 1.9rem;
 }
 
-body > h1:not(:first-of-type),
-body > form,
-body > table,
-#comparison_result {
-    max-width: 100%;
+.section {
+    scroll-margin-top: 18px;
 }
 
 form,
 table,
 #comparison_result:not(:empty) {
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.9);
+    width: 100%;
+    border: 1px solid rgba(220, 229, 221, 0.9);
+    border-radius: var(--radius);
+    background: rgba(255, 255, 255, 0.94);
     box-shadow: var(--shadow);
 }
 
 form {
-    padding: 20px;
+    padding: 16px;
+}
+
+table,
+tbody,
+tr,
+td {
+    display: block;
 }
 
 table {
-    width: 100%;
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
     overflow: hidden;
+    background: transparent;
+    box-shadow: none;
 }
 
 tbody:empty::before {
     display: block;
-    padding: 22px;
+    padding: 18px;
+    border: 1px dashed var(--line);
+    border-radius: var(--radius);
+    background: rgba(255, 255, 255, 0.75);
     color: var(--muted);
     content: "Cargando productos...";
 }
 
-td {
-    padding: 16px 18px;
-    border-bottom: 1px solid var(--line);
-    color: var(--muted);
-    vertical-align: top;
+tr {
+    margin-bottom: 10px;
 }
 
-tr:last-child td {
-    border-bottom: 0;
+td {
+    padding: 14px;
+    border: 1px solid rgba(220, 229, 221, 0.95);
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: 0 8px 22px rgba(31, 40, 35, 0.08);
+    color: var(--muted);
 }
 
 td strong {
+    display: inline-block;
+    margin: 2px 0 8px;
     color: var(--text);
-    font-size: 1.02rem;
+    font-size: 1rem;
+    line-height: 1.25;
+}
+
+#filters {
+    display: flex;
+    gap: 8px;
+    margin: 0 -12px 14px;
+    padding: 0 12px 6px;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+#filters:empty {
+    display: none;
+}
+
+#filters::-webkit-scrollbar {
+    display: none;
+}
+
+#filters label {
+    flex: 0 0 auto;
+    margin: 0;
+}
+
+#filters button {
+    min-height: 38px;
+    margin: 0;
+    border: 1px solid rgba(15, 122, 102, 0.16);
+    border-radius: 999px;
+    padding: 8px 13px;
+    background: var(--surface);
+    color: var(--primary-dark);
+    box-shadow: none;
+    font-size: 0.9rem;
+    white-space: nowrap;
 }
 
 label {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    margin-right: 12px;
+    min-height: 34px;
+    margin: 5px 10px 5px 0;
     color: var(--muted);
-    font-size: 0.95rem;
+    font-size: 0.94rem;
+    font-weight: 650;
 }
 
 input {
-    min-height: 40px;
+    min-height: 44px;
     border: 1px solid var(--line);
-    border-radius: 8px;
+    border-radius: var(--radius);
     background: var(--surface);
     color: var(--text);
     font: inherit;
@@ -133,26 +212,38 @@ input[type="text"],
 input[type="number"],
 input[type="float"],
 input[type="int"] {
-    width: min(260px, 100%);
-    margin: 4px 8px 4px 0;
-    padding: 8px 11px;
+    width: 100%;
+    margin: 6px 0 10px;
+    padding: 10px 12px;
+    box-shadow: inset 0 1px 0 rgba(31, 40, 35, 0.03);
 }
 
 #search {
-    width: min(620px, 100%);
-    min-height: 46px;
-    padding: 10px 14px;
+    min-height: 50px;
+    margin-bottom: 8px;
+    padding: 12px 14px;
+    border-color: rgba(15, 122, 102, 0.32);
+    box-shadow: 0 8px 22px rgba(31, 40, 35, 0.08);
     font-size: 1rem;
 }
 
 input[type="checkbox"],
 input[type="radio"] {
-    width: 18px;
-    height: 18px;
-    min-height: 18px;
-    margin: 0 6px 0 10px;
+    width: 20px;
+    height: 20px;
+    min-height: 20px;
+    margin: 6px 6px 6px 0;
     accent-color: var(--primary);
     vertical-align: middle;
+}
+
+input[type="radio"] + label,
+input[type="checkbox"] + label {
+    margin-right: 12px;
+}
+
+input[type="radio"]:checked + label {
+    color: var(--primary-dark);
 }
 
 input:focus-visible,
@@ -162,22 +253,23 @@ button:focus-visible {
 }
 
 button {
-    min-height: 40px;
-    margin: 4px 8px 4px 0;
+    min-height: 44px;
+    margin: 6px 8px 10px 0;
     border: 0;
-    border-radius: 8px;
-    padding: 9px 14px;
+    border-radius: var(--radius);
+    padding: 10px 15px;
     background: var(--primary);
     color: #ffffff;
+    box-shadow: 0 9px 18px rgba(15, 122, 102, 0.2);
     font: inherit;
-    font-weight: 700;
+    font-weight: 800;
     cursor: pointer;
-    transition: transform 140ms ease, background 140ms ease, box-shadow 140ms ease;
+    transition: background 140ms ease, box-shadow 140ms ease, transform 140ms ease;
 }
 
 button:hover {
     background: var(--primary-dark);
-    box-shadow: 0 8px 20px rgba(15, 87, 75, 0.2);
+    box-shadow: 0 11px 22px rgba(9, 88, 74, 0.22);
     transform: translateY(-1px);
 }
 
@@ -185,72 +277,117 @@ button:active {
     transform: translateY(0);
 }
 
+body > button,
+form button,
+table button {
+    width: 100%;
+}
+
 table button,
 button[onclick="reset_form()"],
 button[onclick="clean_promotions()"] {
     background: var(--surface-soft);
     color: var(--primary-dark);
+    box-shadow: none;
 }
 
 table button:hover,
 button[onclick="reset_form()"]:hover,
 button[onclick="clean_promotions()"]:hover {
-    background: #dfece7;
-}
-
-.section {
-    scroll-margin-top: 80px;
+    background: #dcebe5;
+    box-shadow: none;
 }
 
 #comparison_result:not(:empty) {
-    margin-top: 16px;
-    padding: 18px 20px;
+    margin-top: 14px;
+    padding: 16px;
     border-left: 5px solid var(--accent);
+    background: var(--surface-warm);
     color: var(--text);
-    font-weight: 650;
-}
-
-#span_price {
-    color: var(--primary);
     font-weight: 750;
 }
 
-body > input,
-body > button,
-body > label {
-    margin-bottom: 8px;
+#span_price {
+    display: inline-block;
+    margin-bottom: 4px;
+    color: var(--primary);
+    font-weight: 800;
 }
 
-@media (max-width: 720px) {
+body > label {
+    padding: 4px 0;
+}
+
+@media (min-width: 721px) {
     body {
-        width: min(100% - 20px, 1120px);
-        padding: 18px 0 32px;
+        max-width: 1080px;
+        padding: 88px 24px 48px;
+    }
+
+    #navbar {
+        top: 0;
+        bottom: auto;
+        justify-content: center;
+        grid-template-columns: repeat(4, minmax(130px, 180px));
+        padding: 10px 16px;
+        border-top: 0;
+        border-bottom: 1px solid rgba(220, 229, 221, 0.95);
+        box-shadow: 0 8px 28px rgba(31, 40, 35, 0.1);
+    }
+
+    #navbar button {
+        min-height: 42px;
+        font-size: 0.9rem;
+    }
+
+    h1 {
+        margin-top: 34px;
+        font-size: 1.9rem;
+    }
+
+    h1:first-of-type {
+        font-size: 2.35rem;
+    }
+
+    .section {
+        scroll-margin-top: 92px;
     }
 
     form {
-        padding: 16px;
+        padding: 22px;
     }
 
     input[type="text"],
     input[type="number"],
     input[type="float"],
-    input[type="int"],
-    #search,
-    button {
-        width: 100%;
-        margin-right: 0;
+    input[type="int"] {
+        width: min(280px, 100%);
+        margin-right: 10px;
     }
 
-    input[type="checkbox"],
-    input[type="radio"] {
-        margin-left: 0;
+    #search {
+        width: min(640px, 100%);
     }
 
-    label {
-        margin: 6px 10px 6px 0;
+    body > button,
+    form button,
+    table button {
+        width: auto;
+    }
+
+    table {
+        background: rgba(255, 255, 255, 0.94);
+        box-shadow: var(--shadow);
     }
 
     td {
-        padding: 14px;
+        padding: 16px 18px;
+    }
+
+    #filters {
+        margin-right: 0;
+        margin-left: 0;
+        padding-right: 0;
+        padding-left: 0;
     }
 }
