@@ -4,7 +4,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mercado domestico</title>
     <link rel="icon" href="data:,">
-    <link rel="stylesheet" href="css/style.css">
+    
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="manifest" href="/static/manifest.json">
+
+    <meta name="theme-color" content="#2c3e50">
+    <link rel="apple-touch-icon" href="/static/pwa_icon.png">
 </head>
 
 <body>
@@ -29,6 +34,8 @@
 
     <!-- Tabla -->
     <h1 id="search_section" class="section">Productos</h1>
+
+    <p>Version 3.2</p>
 
     <!-- Buscador -->
     <input type="text" id="search" name="search" placeholder="Buscar producto..." oninput="read_products()">
@@ -167,6 +174,6 @@
 
 </body>
 
-<script src="js/main.js"></script>
+<script src="/static/js/main.js"></script>
 
 </html>

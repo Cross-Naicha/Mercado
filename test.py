@@ -36,8 +36,7 @@ class Instance(BaseModel):
     is_promotion: int
     market: str
 
-app.mount("/js", StaticFiles(directory="js"),name="js")
-app.mount("/css", StaticFiles(directory="css"),name="css")
+app.mount("/static", StaticFiles(directory="static"),name="static")
 
 @app.get("/")
 def root():
@@ -46,6 +45,10 @@ def root():
 @app.get("/home")
 def get_form():
     return FileResponse("index.html")
+
+@app.get("/sw.js")
+def service_worker():
+    return FileResponse("sw.js")
 
 @app.post("/add_product")
 def create_product_endopoint(product: Product):

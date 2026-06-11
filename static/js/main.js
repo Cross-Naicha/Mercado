@@ -10,23 +10,140 @@ let selected_normal_unit = null;
 
 let selected_class_filter = null;
 
-// Funciones
+console.log("Version 3.2")
 
+// Funciones de Arranque
 window.onload = async function() {
 
-    await read_products();
+    await open_database();
 
+    await read_products();
     document.getElementById("search_section")
-        .scrollIntoView();
+    .scrollIntoView();
 
 };
 
+// Funciones Offline
+let db = null;
+
+async function open_database() {
+
+    return new Promise((resolve, reject) => {
+
+        const request = indexedDB.open(
+            "mercado_db",
+            1
+        );
+
+        request.onupgradeneeded = function(event) {
+
+            db = event.target.result;
+
+            if (!db.objectStoreNames.contains("products")) {
+
+                db.createObjectStore(
+                    "products",
+                    { keyPath: "id" }
+                );
+
+            }
+
+        };
+
+        request.onsuccess = function(event) {
+
+            db = event.target.result;
+            resolve(db);
+
+        };
+
+        request.onerror = function(event) {
+
+            reject(event);
+
+        };
+
+    });
+
+}
+
+async function save_products_local(products) {
+
+    const transaction = db.transaction(
+        ["products"],
+        "readwrite"
+    );
+
+    const store = transaction.objectStore(
+        "products"
+    );
+
+    await store.clear();
+
+    for (const product of products) {
+        store.put(product);
+    }
+
+}
+
+async function get_products_local() {
+
+    return new Promise((resolve, reject) => {
+
+        const transaction = db.transaction(
+            ["products"],
+            "readonly"
+        );
+
+        const store = transaction.objectStore(
+            "products"
+        );
+
+        const request = store.getAll();
+
+        request.onsuccess = () => {
+            resolve(request.result);
+        };
+
+        request.onerror = reject;
+
+    });
+
+}
+
+// Funciones online
 async function read_products() {
+
+    console.log("navigator.onLine =",navigator.onLine);
     
     const search = document.getElementById("search").value.toLowerCase();
     
-    const response = await fetch("/get_products");
-    const data = await response.json();
+    let data;
+
+    try {
+
+        console.log("Intentando servidor");
+
+        const response = await fetch("/get_products");
+
+        data = await response.json();
+
+        console.log("Servidor respondió");
+
+        await save_products_local(data);
+
+    }
+    catch(error) {
+
+        console.log(error);
+
+        console.log(
+            "Servidor no disponible. Usando IndexedDB"
+        );
+
+        data = await get_products_local();
+
+    }
 
     // Generacion de los filtros de busqueda
     let filter_class = new Set();
@@ -51,7 +168,7 @@ async function read_products() {
             </label>
             `;
     }
-    
+
     // Generacion de la tabla
     const container = document.getElementById("data_table");
     container.innerHTML = "";
@@ -70,10 +187,11 @@ async function read_products() {
                 .toLowerCase()
                 .includes(search)
         )
+        
         {
             continue;
         }
-        
+                
         container.innerHTML += `
         <tr>
             <td>
@@ -356,4 +474,9 @@ async function save_product_form() {
     document.getElementById("presentation").value = "";
 }
 
-read_products();
+if ("serviceWorker" in navigator) {
+
+    navigator.serviceWorker
+        .register("/sw.js", {scope: "/"});
+
+}
