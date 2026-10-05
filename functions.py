@@ -35,8 +35,11 @@ def create_product(product):
 
     cursor, connection = connect_to_database()
 
-    cursor.execute(sql, values)
-    connection.commit()
+    try:
+        cursor.execute(sql, values)
+        connection.commit()
+    finally:
+        close_database_connection(connection, cursor)
 
 def create_instance(instance):
 
@@ -48,8 +51,11 @@ def create_instance(instance):
 
     cursor, connection = connect_to_database()
 
-    cursor.execute(sql, values)
-    connection.commit()
+    try:
+        cursor.execute(sql, values)
+        connection.commit()
+    finally:
+        close_database_connection(connection, cursor)
 
 def read_product():
 
@@ -57,12 +63,11 @@ def read_product():
 
     cursor, connection = connect_to_database(cursor_dictionary=True)
 
-    cursor.execute(QUERY)
-    result = cursor.fetchall()
-
-    close_database_connection(connection, cursor)
-
-    return result
+    try:
+        cursor.execute(QUERY)
+        return cursor.fetchall()
+    finally:
+        close_database_connection(connection, cursor)
 
 def update_product():
     ...

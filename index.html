@@ -5,7 +5,7 @@
     <title>Mercado domestico</title>
     <link rel="icon" href="data:,">
     
-    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/style.css?v=204">
     <link rel="manifest" href="/static/manifest.json">
 
     <meta name="theme-color" content="#2c3e50">
@@ -24,8 +24,9 @@
         </button>
 
         <button onclick="document.getElementById('instances_section').scrollIntoView({behavior:'smooth'})">
-            Instancias
+            Compras
         </button>
+        <button onclick="document.getElementById('stock_section').scrollIntoView({behavior:'smooth'})">Mi stock</button>
 
         <button onclick="document.getElementById('register_section').scrollIntoView({behavior:'smooth'})">
             Nuevo Producto
@@ -35,145 +36,483 @@
     <!-- Tabla -->
     <h1 id="search_section" class="section">Productos</h1>
 
-    <p>Version 3.2</p>
+    <section aria-label="Guardado y sincronización">
+        <p id="sync_status" role="status">Abriendo datos del teléfono…</p>
+        <button type="button" onclick="sync_pending()">Sincronizar ahora</button>
+        <button type="button" onclick="updateMercadoApp()">Actualizar aplicación</button>
+        <button type="button" onclick="export_pending()">Exportar pendientes</button>
+        <button type="button" onclick="export_database_backup()">Respaldar base de la PC</button>
+        <label>Recuperar respaldo del teléfono <input type="file" accept="application/json" onchange="import_local_backup(this.files[0])"></label>
+        <p id="save_status" role="status"></p>
+        <details id="pending_details"><summary>Registros pendientes: ver errores y corregir</summary><p>Si una compra tiene un importe incorrecto, corregí la cantidad y el importe total: el precio medio se calcula automáticamente.</p><ul id="pending_list"></ul></details>
+    </section>
+    <div id="debug" hidden></div>
 
     <!-- Buscador -->
+    <div id="product_search_controls">
+    <div id="catalog_filter_control"></div>
     <input type="text" id="search" name="search" placeholder="Buscar producto..." oninput="read_products()">
-    <button type="button" onclick="reset_form()">Limpiar</button>
-    <br><br>
+    <button type="button" class="clear-filters" aria-label="Limpiar búsqueda" title="Limpiar búsqueda" onclick="reset_form()">&lt;</button>
+    </div>
+
+    <button id="search_add_product" type="button" hidden onclick="showModule('new')">Agregar nuevo producto</button>
 
     <!-- Filtros de la tabla -->
+    <div id="active_filters" class="catalog-filters" hidden aria-label="Filtros activos"></div>
     <div id="filters"></div>
+    <section id="product_filter_section" hidden aria-label="Filtro por producto">
+        <div id="product_filters" class="catalog-filters"></div>
+    </section>
+    <section id="brand_filter_section" hidden aria-label="Filtro por marca">
+        <div id="brand_filters" class="catalog-filters"></div>
+    </section>
 
     <table>
         <tbody id="data_table">
             <!-- Aquí se insertarán los datos -->
         </tbody>
     </table>
+    <button id="search_add_product_bottom" type="button" hidden onclick="showModule('new')">Agregar nuevo producto</button>
+
+    <div id="product_editor_home">
+    <section id="product_editor" hidden>
+        <button type="button" class="editor-floating-back" aria-label="Volver a la lista sin guardar" title="Volver sin guardar" onclick="closeProductEditor()">&lt;</button>
+        <h2>Editar producto</h2>
+        <form>
+            <label>Producto <input id="edit_name" maxlength="255" required></label>
+            <label>Marca <input id="edit_brand" maxlength="255"></label>
+            <label>Tipo <input id="edit_type" maxlength="255"></label>
+            <label>Subtipo <input id="edit_subtype" maxlength="255"></label>
+            <label>Sabor <input id="edit_flavor" maxlength="255"></label>
+            <label>Categoría <input id="edit_category" maxlength="255"></label>
+            <label>Ubicación <input id="edit_storage_location" maxlength="255"></label>
+            <label>Ubicación interna <input id="edit_storage_detail" maxlength="255"></label>
+        <label>Modalidad <select id="stock_sale_mode"><option value="">Sin confirmar</option><option value="package" selected>Envase de contenido fijo</option><option value="multipack">Paquete de varias unidades</option><option value="fractional">Fraccionado por peso/volumen</option><option value="unit">Por unidad</option></select></label>
+        <label>Unidad de contenido <select id="stock_content_unit"><option value="g">Gramos</option><option value="kg">Kilos</option><option value="ml">Mililitros</option><option value="l">Litros</option><option value="unit">Unidades</option></select></label>
+        <label>Contenido por envase <input id="stock_package_content" type="number" step="any" min="0"></label>
+        <label>Contenido de cada unidad (opcional) <input id="stock_unit_content" type="text" inputmode="decimal" step="any" min="0"></label>
+        <label>Contenido total del paquete (opcional) <input id="stock_total_content" type="text" inputmode="decimal"></label>
+        <label>Medida de cada unidad <select id="stock_unit_content_unit"><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="l">litros</option></select></label>
+            <button type="button" onclick="saveProductEdit()">Guardar cambios</button>
+            <button type="button" onclick="newPresentationFromEdit()">Crear otra presentación</button>
+            <button type="button" onclick="editShelfObservation()">Editar góndola</button>
+            <button type="button" class="editor-delete-button" onclick="showDeleteProductConfirmation()">Borrar producto</button>
+            <div id="delete_product_confirmation" hidden>
+                <p>¿Borrar este producto? Se quitará del catálogo y se conservará su historial de compras y precios.</p>
+                <button type="button" class="editor-delete-button" onclick="deleteEditedProduct()">Confirmar borrado</button>
+                <button type="button" onclick="document.getElementById('delete_product_confirmation').hidden=true">Cancelar</button>
+            </div>
+        </form>
+    </section>
+    </div>
+    <div id="product_actions_home">
+    <section id="product_actions" hidden aria-label="Acciones del producto">
+        <div class="product-actions-heading">
+            <h2 id="product_actions_title"></h2>
+            <button type="button" class="clear-filters" aria-label="Volver a la lista" title="Volver a la lista" onclick="closeProductActions()">&lt;</button>
+        </div>
+        <button type="button" onclick="useProduct('compare')">Comparar precio</button>
+        <button type="button" class="product-buy-button" onclick="useProduct('purchase')">Agregar al carrito</button>
+        <div class="product-shelf-actions">
+            <button type="button" onclick="useProduct('shelf')">En góndola</button>
+            <button type="button" onclick="recordSameShelfPrice()">Mismo precio</button>
+        </div>
+        <button type="button" onclick="useProduct('add')">Agregar al stock</button>
+        <button type="button" onclick="useProduct('remove')">Registrar consumo o descarte</button>
+        <button type="button" onclick="useProduct('edit')">Editar producto</button>
+    </section>
+    </div>
 
     <!-- Comparar -->
+    <div id="shelf_price_home">
+    <section id="shelf_price_form" hidden>
+        <h2>Registrar precio de góndola</h2>
+        <p id="shelf_price_product"></p>
+        <form>
+            <div class="shelf-price-entry">
+                <input id="shelf_price" type="text" inputmode="decimal" autocomplete="off" placeholder="Precio por envase" aria-label="Precio por envase">
+                <label class="shelf-cent-option"><input id="shelf_subtract_cent" type="checkbox"> −0,01</label>
+            </div>
+            <div id="shelf_fractional_fields" hidden>
+                <input id="shelf_amount_paid" type="text" inputmode="decimal" autocomplete="off" placeholder="Importe pagado (opcional)" aria-label="Importe pagado">
+                <p id="shelf_fractional_amount" aria-live="polite"></p>
+            </div>
+            <select id="shelf_branch" hidden><option value="">Elegí local</option></select>
+            <input id="shelf_market" type="hidden">
+            <select id="shelf_promotion" aria-label="Promoción" onchange="updateSpecialPromotion()"><option value="none">Promoción: sin promoción</option><option value="offer">Oferta (precio rebajado)</option><option value="2x1">2×1</option><option value="3x2">3×2</option><option value="4x3">4×3</option><option value="2_50%">Segunda al 50%</option><option value="2_80%">Segunda al 80%</option><option value="special">Promoción especial</option></select>
+            <div id="shelf_special_fields" hidden>
+                <input id="shelf_special_quantity" type="number" inputmode="numeric" min="1" max="1000000" step="1" placeholder="Cantidad de envases o unidades" aria-label="Cantidad de envases o unidades">
+                <input id="shelf_special_total" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Importe total de la oferta" aria-label="Importe total de la oferta">
+                <textarea id="shelf_special_description" maxlength="500" placeholder="Descripción: ej. 4 turrones por $1.000" aria-label="Descripción de la oferta"></textarea>
+            </div>
+            <input id="shelf_date" type="date" aria-label="Fecha">
+            <div id="shelf_local_options" class="catalog-filters" aria-label="Elegir local"></div>
+            <button type="button" onclick="saveShelfPrice()">Guardar precio de góndola</button>
+            <button type="button" onclick="closeShelfPrice()">Cancelar</button>
+        </form>
+    </section>
+    </div>
     <h1 id="compare_section" class="section">Comparar</h1>
-
-    Nuevo precio <input type="number" id="new_price">
-    <input type="checkbox" id="checkbox_new_price_9_99" checked>9,99
-    <br><br>
-    Nueva presentacion <input type="number" id="new_presentation">
-    
-    <br>
-    <input type="radio" name="promotion" id="2x1">
-    <label>2x1</label>
-    
-    <input type="radio" name="promotion" id="3x2">
-    <label>3x2</label>
-    
-    <input type="radio" name="promotion" id="4x3">
-    <label>4x3</label>
-
-    <br>
-    <input type="radio" name="promotion" id="2_50%">
-    <label>2da al 50%</label>
-
-    <input type="radio" name="promotion" id="2_80%">
-    <label>2da al 80%</label>
-
-    <br>
-    <button type="button" onclick="clean_promotions()">Limpiar</button>
-    <br><br>
-    
-    <button type="button" onclick="compare_prices()">Comparar</button>
-    
-    <div id="comparison_result"></div>
+    <section id="compare_product_a" class="compare-card" aria-label="Producto A, referencia">
+        <strong id="compare_product_label">Presentación A</strong>
+        <div class="compare-price-entry"><div class="compare-field editor-field"><input id="compare_product_reference" type="text" inputmode="decimal" autocomplete="off" placeholder="Precio por envase" aria-label="Precio por envase de A" data-caption="Precio por envase" oninput="updateComparisonCentCheckbox()"><span class="editor-field-caption"></span></div><label class="compare-cent-option"><input type="checkbox" id="checkbox_compare_a_9_99" disabled> −0,01</label></div>
+        <div class="compare-field editor-field"><input id="compare_product_content" type="text" inputmode="decimal" autocomplete="off" placeholder="Contenido por envase" aria-label="Contenido por envase de A" data-caption="Contenido por envase"><span class="editor-field-caption"></span></div>
+        <input type="hidden" id="compare_content_unit" value="kg">
+    </section>
+    <section id="compare_product_b" class="compare-card" aria-label="Producto B, precio y contenido a comparar">
+        <strong id="compare_product_b_label">Presentación B</strong>
+        <div class="compare-price-entry">
+            <div class="compare-field editor-field">
+                <input type="text" id="new_price" inputmode="decimal" autocomplete="off" placeholder="Precio de lista por envase" aria-label="Precio de lista por envase" data-caption="Precio de lista por envase" oninput="updateComparisonCentCheckbox()">
+                <span class="editor-field-caption"></span>
+            </div>
+            <label class="compare-cent-option"><input type="checkbox" id="checkbox_new_price_9_99" disabled> −0,01</label>
+        </div>
+        <div class="compare-field editor-field">
+            <input type="text" id="new_presentation" inputmode="decimal" autocomplete="off" placeholder="Contenido por envase" aria-label="Contenido por envase" data-caption="Contenido por envase">
+            <span class="editor-field-caption"></span>
+        </div>
+        <label class="compare-promotion-toggle"><input type="checkbox" id="compare_promotions_enabled" onchange="toggleComparisonPromotions()"> Promoción</label>
+        <div id="compare_promotions" hidden aria-label="Promoción del producto B">
+            <input type="radio" name="promotion" id="offer"><label for="offer">Oferta (precio rebajado)</label>
+            <input type="radio" name="promotion" id="2x1"><label for="2x1">2×1</label>
+            <input type="radio" name="promotion" id="3x2"><label for="3x2">3×2</label>
+            <input type="radio" name="promotion" id="4x3"><label for="4x3">4×3</label>
+            <input type="radio" name="promotion" id="2_50%"><label for="2_50%">2da al 50%</label>
+            <input type="radio" name="promotion" id="2_80%"><label for="2_80%">80% de descuento en la segunda</label>
+            <input type="radio" name="promotion" id="special"><label for="special">Promoción especial</label>
+        </div>
+        <div id="compare_special_fields" hidden>
+            <div class="compare-field editor-field">
+                <input id="compare_special_quantity" type="text" inputmode="numeric" autocomplete="off" placeholder="Cantidad de envases o unidades" aria-label="Cantidad de envases o unidades" data-caption="Cantidad de envases o unidades"><span class="editor-field-caption"></span>
+            </div>
+            <div class="compare-field editor-field">
+                <input id="compare_special_total" type="text" inputmode="decimal" autocomplete="off" placeholder="Importe total de la oferta" aria-label="Importe total de la oferta" data-caption="Importe total de la oferta"><span class="editor-field-caption"></span>
+            </div>
+            <div class="compare-field editor-field">
+                <textarea id="compare_special_description" maxlength="500" placeholder="Descripción de la promoción" aria-label="Descripción de la promoción" data-caption="Descripción de la promoción"></textarea><span class="editor-field-caption"></span>
+            </div>
+        </div>
+    </section>
+    <div class="compare-actions">
+        <button type="button" onclick="clean_promotions()">Limpiar</button>
+        <button type="button" onclick="compare_prices()">Comparar</button>
+    </div>
+    <div id="comparison_report">
+        <div id="comparison_result"></div>
+        <button id="compare_register_shelf" type="button" hidden onclick="registerComparisonShelf()">Registrar</button>
+    </div>
 
     <!-- Instancias -->
-    <h1 id="instances_section" class="section">Instancia</h1>
+    <h1 id="instances_section" class="section">Agregar al carrito</h1>
     <form>
 
-        <label>Product_id </label>
-        <input type="int" id="product_id" name="product_id">
+        <input type="hidden" id="product_id" name="product_id">
+        <p id="purchase_product_label">Seleccioná un producto</p>
 
-        <br><br>
-
-        <label>Price </label>
-        <span id="span_price"></span>
-        <input type="float" id="price" name="price">
+        <label id="purchase_price_label">Precio por envase o por kg/litro, según el producto</label>
+        <input type="number" id="price" name="price" step="any" min="0" inputmode="decimal" placeholder="Ingresá el precio">
         
-        <input type="checkbox" id="checkbox_99" checked>
-        <label for="checkbox_99">9,99</label>
-        <input type="checkbox" id="checkbox_is_promotion">
-        <label for="checkbox_is_promotion">Promoción</label>
-        
-        <br><br>
+        <input type="checkbox" id="checkbox_99">
+        <label for="checkbox_99">Restar $0,01</label>
+        <input type="checkbox" id="purchase_promotions_enabled" onchange="togglePurchasePromotions()"><label for="purchase_promotions_enabled">Promoción</label>
+        <div id="purchase_promotions" hidden aria-label="Promoción de esta compra">
+            <input type="radio" name="purchase_promotion" id="purchase_promo_none" value="none" checked hidden><label for="purchase_promo_none" hidden>Sin promoción</label>
+            <input type="radio" name="purchase_promotion" id="purchase_promo_offer" value="offer"><label for="purchase_promo_offer">Oferta</label>
+            <input type="radio" name="purchase_promotion" id="purchase_promo_2x1" value="2x1"><label for="purchase_promo_2x1">2×1</label>
+            <input type="radio" name="purchase_promotion" id="purchase_promo_3x2" value="3x2"><label for="purchase_promo_3x2">3×2</label>
+            <input type="radio" name="purchase_promotion" id="purchase_promo_4x3" value="4x3"><label for="purchase_promo_4x3">4×3</label>
+            <input type="radio" name="purchase_promotion" id="purchase_promo_2_50" value="2_50%"><label for="purchase_promo_2_50">2da al 50%</label>
+            <input type="radio" name="purchase_promotion" id="purchase_promo_2_80" value="2_80%"><label for="purchase_promo_2_80">80% de descuento en la segunda</label>
+            <input type="radio" name="purchase_promotion" id="purchase_promo_special" value="special"><label for="purchase_promo_special">Promoción especial</label>
+        </div>
+        <div id="purchase_special_fields" hidden>
+            <label>Cantidad de envases o unidades <input id="purchase_special_quantity" type="number" inputmode="numeric" min="1" max="1000000" step="1"></label>
+            <label>Importe total de la oferta <input id="purchase_special_total" type="number" inputmode="decimal" min="0" step="0.01"></label>
+            <label>Descripción <textarea id="purchase_special_description" maxlength="500" placeholder="Ej.: 4 turrones por $1.000"></textarea></label>
+        </div>
+        <div id="purchase_promotion_result" aria-live="polite"></div>
 
-        <label>Market </label>
-        <input type="text" id="market" name="market">
-        
-        <input type="checkbox" id="checkbox_market" checked>
-        <label for="checkbox_market">Mantener</label>
+        <input type="hidden" id="market" name="market">
+        <select id="purchase_branch" hidden><option value="">Sin local elegido</option></select>
+        <input type="checkbox" id="checkbox_market" checked hidden>
+        <div id="purchase_local_options" class="catalog-filters" aria-label="Local de esta compra"></div>
 
-        <br><br>
+        <div class="purchase-quantity-field editor-field">
+            <input type="number" id="quantity" value="1" step="any" min="0" inputmode="decimal" placeholder="Cantidad de envases o unidades" aria-label="Cantidad de envases o unidades">
+            <span id="purchase_quantity_caption" class="editor-field-caption">Cantidad de envases o unidades: 1</span>
+        </div>
+        <input type="checkbox" id="checkbox_quantity_1_1000" hidden>
+        <button type="button" id="purchase_buy_button" onclick="save_instance_form()">Agregar al carrito</button>
 
-        <button type="button" onclick="save_instance_form()">Enviar</button>
-        <input type="number" id="quantity" value="1">
-        <input type="checkbox" id="checkbox_quantity_1_1000">
-        <label for="checkbox_quantity_1_1000">1/1000</label>
+        <input type="hidden" id="purchase_total">
+        <p id="purchase_fractional_amount" hidden aria-live="polite"></p>
 
     </form>
 
+    <h1 id="cart_section" class="section">Carrito</h1>
+    <p>Revisá el total antes de confirmar.</p>
+    <button type="button" onclick="openOccasionalCart()">Agregar compra ocasional</button>
+    <form id="occasional_cart_form" hidden onsubmit="saveOccasionalCart(event)">
+        <input id="occasional_description" type="text" maxlength="255" placeholder="Descripción (opcional)" aria-label="Descripción">
+        <input id="occasional_total" type="text" inputmode="decimal" required placeholder="Importe total" aria-label="Importe total">
+        <button type="submit">Guardar</button>
+        <button type="button" class="occasional-cancel" onclick="document.getElementById('occasional_cart_form').hidden=true">Cancelar</button>
+    </form>
+    <div id="cart_items"></div>
+    <p id="cart_total" aria-live="polite"></p>
+    <button type="button" id="cart_confirm" onclick="confirmCart()" disabled>Confirmar compra</button>
+
+    <h1 id="stock_section" class="section">Mi stock</h1>
+    <button id="stock_review_button" type="button" onclick="openStockReview()">Revisar stock</button>
+    <section id="stock_review" hidden aria-label="Revisión de stock">
+        <div id="stock_review_rooms" class="catalog-filters"></div>
+        <p id="stock_review_progress" aria-live="polite"></p>
+        <div id="stock_review_card"></div>
+        <div id="stock_review_actions" class="stock-review-actions" hidden>
+            <button id="stock_review_previous" type="button" onclick="stepStockReview(-1)">Anterior</button>
+            <button type="button" onclick="stepStockReview(1)">Omitir</button>
+            <button id="stock_review_save" type="button" onclick="saveStockReviewCard()">Guardar y siguiente</button>
+        </div>
+        <button type="button" class="stock-location-cancel" onclick="closeStockReview()">Salir de la revisión</button>
+    </section>
+    <section id="stock_locations_section" aria-label="Ubicaciones de los productos">
+        <h2>Ubicaciones</h2>
+        <div id="stock_location_filters" class="catalog-filters"></div>
+        <div id="stock_named_location_filters" class="catalog-filters"></div>
+        <div id="stock_detail_filters" class="catalog-filters" hidden></div>
+        <div id="stock_location_products"></div>
+    </section>
+    <p>Las compras históricas no son existencias actuales. Cargá lo que tenés en casa y luego registrá compras y consumos. Las cantidades del stock se muestran en g, ml o unidades.</p>
+    <form>
+        <label>Producto <select id="stock_product" onchange="configureStockSelection(this.value).then(renderStock)"><option value="">Elegí un producto</option></select></label>
+        <button type="button" onclick="editProduct(document.getElementById('stock_product').value)">Editar características del producto</button>
+        <p id="stock_selected">Seleccioná un producto para gestionar sus existencias.</p>
+        <br><label>Stock mínimo deseado <input id="stock_minimum" type="number" step="any" min="0" value="0"></label><span id="stock_minimum_unit">Unidad pendiente</span>
+        <button type="button" onclick="save_minimum()">Guardar mínimo</button>
+    </form>
+    <h2>Cargar lo que ya tenés</h2>
+    <form>
+        <div id="initial_multipack_fields" hidden>
+            <label>Paquetes cerrados <input id="initial_packs" type="number" inputmode="numeric" min="0" step="1"></label>
+            <label>Unidades sueltas <input id="initial_loose_units" type="number" inputmode="numeric" min="0" step="1"></label>
+            <p id="initial_units_preview" aria-live="polite"></p>
+        </div>
+        <label id="initial_quantity_field">Cantidad de contenido <input id="initial_quantity" type="number" step="any" min="0"></label>
+        <select id="initial_unit"><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="l">litros</option><option value="unit">unidades</option></select>
+        <label>Ubicación <input id="initial_location" type="text" value="Despensa" maxlength="255"></label>
+        <label>Vencimiento <input id="initial_expiry" type="date"></label>
+        <select id="initial_expiry_source"><option value="exact">Fecha del envase</option><option value="estimated">Fecha estimada</option></select>
+        <button type="button" onclick="save_initial_stock()">Agregar stock inicial</button>
+    </form>
+    <h2>Existencias y vencimientos</h2><div id="stock_list"></div>
+    <h2>Registrar uso o corrección</h2>
+    <form>
+        <label>Lote <select id="movement_lot"><option value="">Elegí un lote</option></select></label>
+        <label>Acción <select id="movement_reason"><option value="consume">Consumí</option><option value="discard">Descarté</option><option value="open">Abrí un envase (sin descontar)</option><option value="adjust">Corregir cantidad</option></select></label>
+        <label>Cantidad en g/ml/unidades del lote <input id="movement_quantity" type="number" step="any" min="0"></label>
+        <label>Para correcciones <select id="movement_direction"><option value="remove">Restar</option><option value="add">Sumar</option></select></label>
+        <label>Nota <input id="movement_note" type="text" maxlength="500"></label>
+        <button type="button" onclick="save_stock_move()">Guardar movimiento</button>
+    </form>
+    <details><summary>Historial y correcciones</summary><ul id="stock_history"></ul></details>
+    <h2>Lista del súper</h2>
+    <p>Se calcula con los mínimos y las existencias que no vencieron. Las fechas estimadas también se consideran; revisalas. Las entradas manuales se guardan en este dispositivo.</p>
+    <ul id="shopping_list"></ul>
+    <input id="shopping_text" type="text" placeholder="Agregar una necesidad manual" maxlength="500">
+    <button type="button" onclick="addShoppingItem()">Agregar a la lista</button>
+
+    <h1 id="assistant_section" class="section">Asistente de compras</h1>
+    <h2>Códigos de barras</h2>
+    <input id="barcode_value" type="text" inputmode="numeric" maxlength="80" placeholder="Código, conservando los ceros">
+    <button type="button" onclick="findBarcode()">Buscar código</button>
+    <button type="button" onclick="startScanner()">Escanear con cámara</button>
+    <button type="button" onclick="stopScanner()">Cerrar cámara</button>
+    <video id="scan_video" muted playsinline hidden style="width:100%;max-width:420px"></video>
+    <label>Leer código desde una foto <input type="file" accept="image/*" capture="environment" onchange="scanBarcodePhoto(this.files[0])"></label>
+    <label>Producto existente <select id="assist_product"><option value="">Elegí un producto</option></select></label>
+    <button type="button" onclick="saveBarcode()">Asociar código al producto</button>
+    <details><summary>Códigos guardados</summary><ul id="barcode_list"></ul></details>
+    <h2>Buscar por parecido de foto</h2>
+    <p>Guardá una foto frontal del producto como referencia. Luego otra foto puede sugerir coincidencias del catálogo local. Revisá la marca y presentación antes de elegir; no extrae datos de envases desconocidos.</p>
+    <label>Guardar referencia del producto elegido <input type="file" accept="image/*" capture="environment" onchange="saveReferencePhoto(this.files[0])"></label>
+    <label>Buscar un producto por foto <input type="file" accept="image/*" capture="environment" onchange="suggestPhoto(this.files[0])"></label>
+    <div id="photo_results"></div>
+    <h2>Supermercados y locales</h2>
+    <button type="button" onclick="editBranch('')">Nuevo local</button>
+    <div id="branch_filters" class="catalog-filters"></div>
+    <input id="branch_search" type="search" placeholder="Buscar supermercado o local" oninput="renderBranchCards()" autocomplete="off">
+    <table><tbody id="branch_cards"></tbody></table>
+    <div id="branch_form_home">
+    <form id="branch_form" hidden>
+        <h2 id="branch_form_title">Nuevo local</h2>
+        <select id="branch_edit" hidden><option value="">Nuevo local</option></select>
+        <label>Supermercado <input id="branch_name" type="text" maxlength="255" required></label>
+        <label>Local (dirección o referencia) <input id="branch_address" type="text" maxlength="500" required></label>
+        <button type="button" onclick="saveBranch()">Guardar local</button>
+        <button type="button" class="editor-floating-back" aria-label="Volver a los locales sin guardar" onclick="closeBranchForm()">&lt;</button>
+    </form>
+    </div>
+    <h2>Ubicaciones y recorrido</h2>
+    <label>Local para esta compra <select id="route_branch" onchange="choosePurchaseBranch(this.value).then(loadMap)"><option value="">Elegí local</option></select></label>
+    <label><input id="cold_last" type="checkbox" checked onchange="renderShopping()">Recoger refrigerados/congelados al final</label>
+    <div id="route_choices"></div><div id="route_result"></div>
+    <details id="location_form"><summary>Registrar o corregir ubicación de un producto</summary>
+        <label>Producto <select id="location_product"><option value="">Elegí producto</option></select></label>
+        <label>Pasillo <input id="location_aisle" type="text" maxlength="80"></label>
+        <label>Orden del pasillo <input id="location_order" type="number" min="0" max="10000" value="1"></label>
+        <label>Estante/altura <input id="location_shelf" type="text" maxlength="120"></label>
+        <label>Referencia <input id="location_reference" type="text" maxlength="255" placeholder="Ej.: exhibición frente a cajas"></label>
+        <label>Punto del mapa (opcional) <input id="location_node" type="text" maxlength="80"></label>
+        <label><input id="location_cold" type="checkbox">Producto refrigerado o congelado</label>
+        <button type="button" onclick="saveLocation()">Guardar ubicación</button>
+        <button type="button" onclick="editingLocation=null;notice('La próxima ubicación se guardará como adicional')">Agregar otra ubicación</button>
+        <ul id="location_list"></ul>
+    </details>
+    <details><summary>Mapa de conexiones transitables</summary>
+        <p>Nombrá puntos de paso (entrada, cruces, sectores y cajas). Un punto por línea: nombre | etiqueta. Una conexión por línea: desde | hasta | metros. Las conexiones permiten caminar en ambos sentidos. Dibujá solo pasos transitables.</p>
+        <label>Puntos <textarea id="map_nodes" rows="6" placeholder="entrada | Entrada&#10;p1 | Pasillo 1&#10;cajas | Cajas"></textarea></label>
+        <label>Conexiones <textarea id="map_edges" rows="6" placeholder="entrada | p1 | 10&#10;p1 | cajas | 15"></textarea></label>
+        <label>Entrada <input id="map_entrance" type="text" value="entrada"></label>
+        <label>Cajas <input id="map_checkout" type="text" value="cajas"></label>
+        <button type="button" onclick="saveMap()">Guardar mapa</button>
+        <p>La ruta respeta las conexiones. Recoger fríos al final no impide pasar por ese pasillo antes.</p>
+    </details>
+    <details><summary>Productos equivalentes</summary>
+        <label>Crear o editar grupo <select id="group_edit" onchange="editGroup(this.value)"><option value="">Crear grupo nuevo</option></select></label>
+        <label>Necesidad que cubren <input id="group_name" type="text" maxlength="120" placeholder="Ej.: leche"></label>
+        <label>Alternativas <select id="group_products" multiple size="6"></select></label>
+        <button type="button" onclick="saveGroup()">Guardar equivalencias</button>
+    </details>
+
     <!-- Registro -->
     <h1 id="register_section" class="section">Registro</h1>
+    <input id="new_barcode" type="hidden">
 
-    <input type="checkbox" id="checkbox_product" onchange="another_similar_product()" checked>
-    <label for="checkbox_product">Producto</label>
+    <div class="catalog-filters">
+        <button type="button" id="multiple_products_toggle" aria-pressed="false" onclick="toggleMultipleProducts()">Varios productos</button>
+    </div>
+    <div hidden>
+        <input type="checkbox" id="checkbox_product" onchange="another_similar_product()" checked>
+        <input type="checkbox" id="checkbox_brand" onchange="another_similar_product()" checked>
+        <input type="checkbox" id="checkbox_ptype" onchange="another_similar_product()" checked>
+        <input type="checkbox" id="checkbox_psubtype" onchange="another_similar_product()" checked>
+    </div>
 
-    <input type="checkbox" id="checkbox_brand" onchange="another_similar_product()" checked>
-    <label for="checkbox_brand">Marca</label>
+    <form id="new_product_form">
+        <label>Producto <input type="text" id="product" name="product" required></label>
+        <label>Marca <input type="text" id="brand" name="brand"></label>
+        <label>Tipo <input type="text" id="ptype" name="ptype"></label>
+        <label>Subtipo <input type="text" id="psubtype" name="psubtype"></label>
+        <label>Sabor <input type="text" id="new_flavor" maxlength="255"></label>
+        <label>Categoría <input type="text" id="new_category" maxlength="255"></label>
 
-    <input type="checkbox" id="checkbox_ptype" onchange="another_similar_product()" checked>
-    <label for="checkbox_ptype">Tipo</label>
+        <label>Modalidad <select id="new_sale_mode" onchange="updateNewProductFields()" required><option value="package">Envase fijo</option><option value="multipack">Paquete de varias unidades</option><option value="fractional">Fraccionado</option><option value="unit">Por unidad</option></select></label>
+        <label id="new_content_field">Contenido <input id="new_package_content" type="text" inputmode="decimal" step="any" min="0" required></label>
+        <label id="new_unit_field">Unidad <select id="new_content_unit" required><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="l">litros</option><option value="unit">unidades</option></select></label>
+        <label>Contenido de cada unidad (opcional) <input id="new_unit_content" type="text" inputmode="decimal" step="any" min="0"></label>
+        <label>Contenido total del paquete (opcional) <input id="new_total_content" type="text" inputmode="decimal"></label>
+        <label>Medida de cada unidad <select id="new_unit_content_unit"><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="l">litros</option></select></label>
+        <label>Precio por kg/litro <input id="new_fractional_price" type="number" inputmode="decimal" step="any" min="0"></label>
+        <label>Importe pagado en esta compra <input id="new_fractional_total" type="number" inputmode="decimal" step="any" min="0"></label>
+        <p id="new_fractional_amount" hidden aria-live="polite"></p>
 
-    <input type="checkbox" id="checkbox_psubtype" onchange="another_similar_product()" checked>
-    <label for="checkbox_psubtype">Subtipo</label>
-
-    <input type="checkbox" id="checkbox_presentation" onchange="another_similar_product()" checked>
-    <label for="checkbox_presentation">Presentación</label>
-    <br><br>
-
-    <form>
-
-        <label>Product </label>
-        <input type="text" id="product" name="product">
-
-        <br><br>
-
-        <label>Brand </label>
-        <input type="text" id="brand" name="brand">
-
-        <br><br>
-
-        <label>Type </label>
-        <input type="text" id="ptype" name="ptype">
-
-        <br><br>
-
-        <label>Subtype </label>
-        <input type="text" id="psubtype" name="psubtype">
-
-        <br><br>
-
-        <label>Presentation </label>
-        <input type="number" id="presentation" name="presentation">
-        
-        <input type="checkbox" id="checkbox_presentation_1_1000">
-        <label for="checkbox_presentation_1_1000">1/1000</label>
-
-        <br><br>
-
-        <button type="button" onclick="save_product_form()">Enviar</button>
+        <button type="button" onclick="save_product_form()">Guardar producto</button>
+        <button type="button" onclick="save_product_form(true)">Agregar góndola</button>
 
     </form>
 
 </body>
 
-<script src="/static/js/main.js"></script>
+<script>
+// Se entrega con el HTML para poder actualizar incluso si los scripts siguen en una caché anterior.
+window.updateMercadoApp=async function() {
+    const status=document.getElementById('save_status');
+    status.textContent='Buscando la última versión…';
+    try {
+        if(!('serviceWorker' in navigator)) {location.reload();return;}
+        const registration=await navigator.serviceWorker.register('/sw.js',{scope:'/',updateViaCache:'none'});
+        await registration.update();
+        if(registration.installing) {
+            await new Promise((resolve,reject)=>{
+                const worker=registration.installing;
+                const check=()=>{if(worker.state==='installed') resolve();if(worker.state==='redundant') reject(new Error('No se pudo descargar la actualización'));};
+                worker.addEventListener('statechange',check);check();
+            });
+        }
+        if(registration.waiting) {
+            navigator.serviceWorker.addEventListener('controllerchange',()=>location.reload(),{once:true});
+            registration.waiting.postMessage({type:'ACTIVATE_UPDATE'});
+        } else location.reload();
+    } catch(error) {status.textContent='No se pudo actualizar: '+error.message+'. Tus datos siguen guardados.';}
+};
+</script>
+<script src="/static/js/tabs.js?v=204"></script>
+<script src="/static/js/main.js?v=204"></script>
+<script src="/static/js/offline.js?v=204"></script>
+<script src="/static/js/cart.js?v=204"></script>
+<script src="/static/js/stock.js?v=204"></script>
+<script src="/static/js/shopping.js?v=204"></script>
 
 </html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -19,7 +19,13 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-cursor, connection = functions.connect_to_database()
+from sync_api import Operation, apply_operation, get_catalog
+from fastapi import HTTPException
+from pydantic import ValidationError
+import mysql.connector
+from stock_api import stock_snapshot
+from database_backup import export_backup
+from shopping_api import shopping_snapshot
 
 class Product(BaseModel):
     product: str
@@ -48,7 +54,7 @@ def get_form():
 
 @app.get("/sw.js")
 def service_worker():
-    return FileResponse("sw.js")
+    return FileResponse("sw.js",headers={'Cache-Control':'no-cache'})
 
 @app.post("/add_product")
 def create_product_endopoint(product: Product):
@@ -61,3 +67,34 @@ def create_instance_endpoint(instance: Instance):
 @app.get("/get_products")
 def read_product_endpoint():
     return functions.read_product()
+
+@app.get('/api/catalog')
+def catalog_endpoint():
+    try:
+        return get_catalog()
+    except mysql.connector.Error:
+        raise HTTPException(503, 'Base de datos no disponible')
+
+@app.post('/api/sync')
+def sync_endpoint(operation: Operation):
+    try:
+        return apply_operation(operation)
+    except ValidationError as error:
+        raise HTTPException(422, str(error))
+    except mysql.connector.Error:
+        raise HTTPException(503, 'No se pudo confirmar el guardado; reintentar')
+
+@app.get('/api/stock')
+def stock_endpoint():
+    try: return stock_snapshot()
+    except mysql.connector.Error: raise HTTPException(503,'Stock no disponible')
+
+@app.get('/api/backup')
+def backup_endpoint():
+    try: return export_backup()
+    except mysql.connector.Error: raise HTTPException(503,'No se pudo generar el respaldo')
+
+@app.get('/api/shopping')
+def shopping_endpoint():
+    try: return shopping_snapshot()
+    except mysql.connector.Error: raise HTTPException(503,'Información de compras no disponible')

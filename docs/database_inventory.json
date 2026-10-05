@@ -1,0 +1,51 @@
+{
+  "version": "8.0.36",
+  "counts": {
+    "instances": 59,
+    "products": 35
+  },
+  "objects": [
+    [
+      "instances",
+      "BASE TABLE"
+    ],
+    [
+      "products",
+      "BASE TABLE"
+    ],
+    [
+      "rv_last_prices",
+      "VIEW"
+    ],
+    [
+      "rv_tickets",
+      "VIEW"
+    ],
+    [
+      "v_facturas",
+      "VIEW"
+    ],
+    [
+      "v_last_prices",
+      "VIEW"
+    ],
+    [
+      "v_tickets",
+      "VIEW"
+    ]
+  ],
+  "routines": [
+    [
+      "create_instance",
+      "PROCEDURE"
+    ],
+    [
+      "create_product",
+      "PROCEDURE"
+    ],
+    [
+      "search_product",
+      "PROCEDURE"
+    ]
+  ]
+}
