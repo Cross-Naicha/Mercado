@@ -17,6 +17,7 @@
             for(const branch of [...state.branches].sort((a,b)=>(a.name+' '+a.address).localeCompare(b.name+' '+b.address,'es')))select.add(new Option(branch.name+' · '+(branch.address||'Local sin confirmar'),branch.id));
             select.value=window.mercadoActiveBranch;
             const current=state.branches.find(branch=>branch.id===select.value),name=current?current.name+' · '+(current.address||'Local sin confirmar'):'Sin supermercado elegido';
+            button.textContent=current?.short_name || 'S';
             button.title=name;button.setAttribute('aria-label','Elegir supermercado: '+name);button.classList.toggle('has-branch',!!current);
         }catch(_){select.replaceChildren(new Option('Abriendo supermercados…',''));}
     }

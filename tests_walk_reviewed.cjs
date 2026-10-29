@@ -20,6 +20,7 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
 
  await page.evaluate(async({product,other,branch})=>{
  await localTransaction(['catalog','shopping_cache'],tx=>{tx.objectStore('catalog').put(product);tx.objectStore('catalog').put(other);tx.objectStore('shopping_cache').put({id:'snapshot',branches:[branch],barcodes:[],documents:[]});});
+ await MercadoAvailability.set(branch.id,[product.id,...(typeof other==='undefined'?[]:[other.id])],'available');
  localStorage.setItem('mercado-branch-map-v1:'+branch.id,JSON.stringify({version:2,rows:16,cols:16,precision:1,cells:Array.from({length:256},(_,i)=>i===0?1:0),shelves:[{id:'a',name:'Almacén',color:'#0f7a66',cells:[0]}],assignments:{[product.id]:'a',[other.id]:'a'}}));
  },{product,other,branch});
  await page.locator('#tab-walk').click();await page.locator('#walk_branch option[value="'+branch.id+'"]').waitFor({state:'attached'});await page.locator('#active_branch_toggle').click();await page.locator('#active_branch_select').selectOption(branch.id);await page.waitForFunction(()=>document.getElementById('active_branch_picker').hidden);

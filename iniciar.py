@@ -93,7 +93,7 @@ def main():
         else:
             import uvicorn
             print('Iniciando Mercado...')
-            process=subprocess.Popen([sys.executable,'-m','uvicorn','test:app','--host','127.0.0.1','--port',str(PORT),'--reload','--reload-dir',str(ROOT)],cwd=ROOT)
+            process=subprocess.Popen([sys.executable,str(ROOT/'mercado_server.py'),'--port',str(PORT)],cwd=ROOT)
             for _ in range(40):
                 if process.poll() is not None: raise RuntimeError('El servidor no pudo iniciar. Revisa el mensaje anterior.')
                 if is_mercado(): break

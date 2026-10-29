@@ -265,7 +265,7 @@ let actionProductId=null,shelfProductId=null,shelfEditingObservation=null,catalo
 let priceComparisonProduct=null;
 let pricesMode=false;
 let historyMode=false;
-try {historyMode=localStorage.getItem('mercado-history-mode')==='true';pricesMode=!historyMode && localStorage.getItem('mercado-prices-mode')==='true';} catch (_) {}
+// Los modos son temporales: no se restauran al abrir otra sección o sesión.
 function updatePricesModeControls() {
     document.documentElement.classList.toggle('prices-mode',pricesMode);
     document.documentElement.classList.toggle('history-mode',historyMode);
@@ -276,6 +276,11 @@ function updatePricesModeControls() {
     document.dispatchEvent(new Event('mercado-catalog-mode-change'));
 }
 updatePricesModeControls();
+window.resetCatalogModes=function(){
+    pricesMode=false;historyMode=false;priceComparisonProduct=null;
+    try{localStorage.setItem('mercado-prices-mode','false');localStorage.setItem('mercado-history-mode','false');}catch(_){}
+    updatePricesModeControls();void read_products();
+};
 async function setPricesMode(enabled) {
     pricesMode=enabled;if(enabled) {historyMode=false;try {localStorage.setItem('mercado-history-mode','false');} catch (_) {}}priceComparisonProduct=null;
     try {localStorage.setItem('mercado-prices-mode',String(enabled));} catch (_) {}
@@ -375,6 +380,7 @@ function updateShelfFractionalPreview() {
 }
 for(const id of ['shelf_price','shelf_amount_paid','shelf_subtract_cent']) $(id).addEventListener('input',updateShelfFractionalPreview);
 async function openShelfPrice(row) {
+    window.captureWalkReturn?.(row.id);
     shelfEditingObservation=null;
     $('shelf_price_form').querySelector('h2').textContent='Registrar precio de góndola';
     $('shelf_price_form').querySelector('button[onclick="saveShelfPrice()"]').textContent='Guardar precio de góndola';
@@ -396,7 +402,7 @@ async function closeShelfPrice(restore=true) {
     const draftCancelled=comparisonProductDraft?.row.id===shelfProductId;
     shelfProductId=null;shelfEditingObservation=null;$('shelf_price_form').hidden=true;
     if(draftCancelled && restore) {comparisonProductDraft=null;await read_products();openModuleSection('register_section');return;}
-    if(restore) {$('search').value='';resetCatalogFilters();await read_products();}
+    if(restore) {$('search').value='';resetCatalogFilters();await read_products();if(window.productActionReturn)await window.productActionReturn();}
 }
 async function saveShelfPrice() {
     if(saving || !shelfProductId) return;saving=true;
@@ -752,6 +758,7 @@ function identifier() {
 }
 let editingProduct=null,editingRevision=null;
 async function showProductActions(id) {
+    window.captureWalkReturn?.(id);
     const row=(await localRead('catalog')).find(p=>p.id===id);if(!row) return;
     productFilterSnapshot={category:selected_class_filter,product:selected_product_filter,brand:selected_brand_filter};
     selected_class_filter=row.product_class || null;selected_product_filter=row.product_name || null;selected_brand_filter=row.product_brand || null;
@@ -779,6 +786,7 @@ async function closeProductActions(restore=true) {
     }
     productFilterSnapshot=null;
     actionProductId=null;revealedProductId=null;await read_products();$('product_actions').hidden=true;
+    if(restore&&window.productActionReturn){root.style.scrollBehavior=previousScrollBehavior;root.style.overflowAnchor=previousAnchor;await window.productActionReturn();return;}
     if(restore && id) {
         const card=[...$('data_table').querySelectorAll('.product-card')].find(element=>element.dataset.productId===id);
         if(card) {
@@ -825,6 +833,7 @@ async function recordSameShelfPrice(productId=null) {
     finally {saving=false;}
 }
 async function useProduct(action,productId=null) {
+    window.captureWalkReturn?.(productId || $('product_actions').dataset.productId);
     const id=productId || $('product_actions').dataset.productId,row=(await catalogWithPrices()).find(p=>p.id===id);if(!row) return;
     await closeProductActions(false);
     if(action==='edit') {await editProduct(id);return;}
@@ -1261,7 +1270,7 @@ save_instance_form = async function () {
             Object.assign(payload,{add_to_stock:true,stock_quantity,stock_unit:product.content_unit,product_revision:product.revision,location:product.stock_pattern==='irregular' ? 'Sin ubicación' : stockPlaceLabel(productStorageLocations(product)[0]) || 'Despensa',expires_on:null,expiry_source:'exact'});
         }
         await addCartItem(payload);
-        reset_form();notice('Producto agregado al carrito. Todavía no se registró la compra.');
+        reset_form();notice('Producto agregado al carrito. Todavía no se registró la compra.');if(window.productActionReturn)await window.productActionReturn();
     } catch (error) { notice('No se guardó: '+error.message+'. Los campos se conservaron.'); }
     finally { saving=false; }
 };

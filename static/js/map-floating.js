@@ -12,7 +12,7 @@
     try{const saved=JSON.parse(localStorage.getItem('mercado-map-floating-position'));if(Number.isFinite(saved?.x)&&Number.isFinite(saved?.y))position={x:Math.max(0,Math.min(1,saved.x)),y:Math.max(0,Math.min(1,saved.y))};}catch(_){}
     const icons={draw:'<path d="m5 16-1 4 4-1L20 7l-3-3Z"/><path d="m14 7 3 3"/>',name:'<path d="M3 4h8l10 10-7 7L3 10Z"/><circle cx="7.5" cy="8" r="1"/>'};
     function fitViewport(){
-        const viewport=document.getElementById('map_viewport');if(!canvas.classList.contains('map-readonly'))return;
+        const viewport=document.getElementById('map_viewport');if(document.getElementById('map_zones_view')&&!document.getElementById('map_zones_view').hidden){viewport.style.removeProperty('--map-preview-height');return;}if(!canvas.classList.contains('map-readonly'))return;
         const top=viewport.getBoundingClientRect().top,screen=window.visualViewport;
         const bottom=screen?screen.offsetTop+screen.height:window.innerHeight;
         const workspace=document.body.classList.contains('map-assignment-workspace'),preview=canvas.closest('.map-product-preview');
@@ -30,7 +30,7 @@
     }
     function refresh(){
         const preview=canvas.classList.contains('map-readonly');
-        const zoomHost=preview?document.getElementById('map_preview_header'):card;if(zoomControls.parentElement!==zoomHost)zoomHost.append(zoomControls);card.classList.toggle('map-surface-preview',preview);zoomControls.classList.toggle('map-zoom-horizontal',preview);
+        const zoneView=document.getElementById('map_zones_view');const zoomHost=preview&&zoneView?.hidden?document.getElementById('map_preview_header'):card;if(zoomControls.parentElement!==zoomHost)zoomHost.append(zoomControls);card.classList.toggle('map-surface-preview',preview);zoomControls.classList.toggle('map-zoom-horizontal',preview);
         const ready=window.mercadoMapProducts.context().ready;zoomControls.hidden=!ready;const values=[...zoom.options].map(o=>o.value);zoomIn.disabled=zoom.value===values.at(-1);zoomOut.disabled=zoom.value===values[0];button.hidden=!ready||canvas.classList.contains('map-readonly');undo.hidden=canvas.classList.contains('map-readonly');
         const naming=mode.value==='name',label=naming?'Nombrar góndolas':'Dibujar';
         button.dataset.mode=mode.value;button.setAttribute('aria-label','Modo '+label+'. Pulsá para cambiar; arrastrá para mover.');button.title=label+' · Clic para cambiar · Arrastrar para mover';
@@ -57,7 +57,7 @@
         event.preventDefault();pan={id:event.pointerId,x:event.clientX,y:event.clientY,left:viewport.scrollLeft,top:viewport.scrollTop,moved:false};viewport.setPointerCapture(event.pointerId);
     });
     viewport.addEventListener('pointermove',event=>{if(!pan||event.pointerId!==pan.id)return;if(!pan.moved&&Math.hypot(event.clientX-pan.x,event.clientY-pan.y)<5)return;pan.moved=true;viewport.classList.add('is-panning');event.preventDefault();viewport.scrollLeft=pan.left+pan.x-event.clientX;viewport.scrollTop=pan.top+pan.y-event.clientY;});
-    function endPan(event){if(pan&&event.pointerId===pan.id){if(!pan.moved&&event.type==='pointerup'){const zone=window.mercadoMapProducts.zoneAt(event.clientX,event.clientY);if(zone)document.dispatchEvent(new CustomEvent('mercado-map-zone-picked',{detail:zone}));}pan=null;viewport.classList.remove('is-panning');}}
+    function endPan(event){if(pan&&event.pointerId===pan.id){if(!pan.moved&&event.type==='pointerup'){const zone=window.mercadoMapProducts.zoneAt(event.clientX,event.clientY);if(zone){document.dispatchEvent(new CustomEvent('mercado-map-zone-picked',{detail:zone}));}}pan=null;viewport.classList.remove('is-panning');}}
     viewport.addEventListener('pointerup',endPan);viewport.addEventListener('pointercancel',endPan);viewport.addEventListener('lostpointercapture',endPan);
     mode.addEventListener('change',refresh);document.addEventListener('mercado-map-change',refresh);
     new ResizeObserver(place).observe(card);refresh();

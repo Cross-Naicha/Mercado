@@ -31,7 +31,7 @@ async function shoppingEffect(op) {
         if (old && old.product_id!==product_id) throw new Error('Ese código ya pertenece a otro producto');
         return {sequence:op.sequence,barcode:{code,product_id}};
     }
-    if (op.kind==='branch') return {sequence:op.sequence,branch:{id:op.entity_id,name:p.name,address:p.address,revision:p.expected_revision+1,location_confirmed:true}};
+    if (op.kind==='branch') return {sequence:op.sequence,branch:{id:op.entity_id,name:p.name,address:p.address,short_name:p.short_name,revision:p.expected_revision+1,location_confirmed:true}};
     if (op.kind==='shopping_document') return {sequence:op.sequence,document:{id:op.entity_id,kind:p.kind,owner_id:p.owner_id,payload:p.data,revision:p.expected_revision+1}};
     return null;
 }
@@ -152,7 +152,9 @@ async function renderBranchCards(state) {
     const focused=branchMenu || (branchEditing!=='new' ? branchEditing : null),query=$('branch_search').value.toLocaleLowerCase('es');
     for(const branch of state.branches) {
         if(focused ? branch.id!==focused : (branchFilter && branch.name!==branchFilter) || !(branch.name+' '+(branch.address || '')).toLocaleLowerCase('es').includes(query)) continue;
-        const tr=document.createElement('tr'),card=document.createElement('td'),title=document.createElement('strong');card.className='product-card';card.dataset.branchId=branch.id;title.textContent=branch.name+' · '+(branch.address || 'Local sin confirmar');card.append(title);
+        const tr=document.createElement('tr'),card=document.createElement('td'),title=document.createElement('strong');card.className='product-card';card.dataset.branchId=branch.id;title.textContent=branch.name;
+        const address=document.createElement('p');address.className='branch-address';address.textContent=branch.address || 'Local sin confirmar';card.append(title,address);
+        if(branch.id===window.mercadoActiveBranch) {const badge=document.createElement('span');badge.className='branch-active';badge.textContent='Local de esta compra';card.append(badge);}
         const actions=document.createElement('div');actions.className='product-row-actions';
         for(const [text,action] of [['Seleccionar',async()=>{branchMenu=branch.id;await renderBranchCards();centerProductCard($('branch_cards').querySelector('.product-card'));}],['Editar',()=>editBranch(branch.id)]]) {const button=document.createElement('button');button.type='button';button.textContent=text;button.onclick=action;actions.append(button);}
         if(!focused) card.append(actions);
@@ -160,11 +162,13 @@ async function renderBranchCards(state) {
         card.onclick=event=>{if(event.target.closest('button,input,select,form')) return;branchRevealed=branchRevealed===branch.id ? null : branch.id;void renderBranchCards().then(()=>{const current=[...list.querySelectorAll('.product-card')].find(card=>card.dataset.branchId===branch.id);if(branchRevealed && current) centerProductCard(current);});};
         if(branchMenu===branch.id) {
             const heading=document.createElement('h2');heading.textContent='¿Qué querés hacer?';heading.style.textAlign='center';card.append(heading);
-            for(const [text,action] of [['Comprar en este local',async()=>{await choosePurchaseBranch(branch.id);await closeBranchForm();showModule('products');notice('Local elegido: '+title.textContent);}],['Editar local',()=>editBranch(branch.id)],['<',()=>closeBranchForm()]]) {const button=document.createElement('button');button.type='button';button.textContent=text;button.onclick=action;if(text==='<') {button.className='branch-back';button.setAttribute('aria-label','Volver a los locales');}card.append(button);}
+            for(const [text,action] of [['Comprar en este local',async()=>{await choosePurchaseBranch(branch.id);await closeBranchForm();showModule('products');notice('Local elegido: '+branch.name+' · '+(branch.address || 'Local sin confirmar'));}],['Editar local',()=>editBranch(branch.id)],['<',()=>closeBranchForm()]]) {const button=document.createElement('button');button.type='button';button.textContent=text;button.onclick=action;if(text==='<') {button.className='branch-back';button.setAttribute('aria-label','Volver a los locales');}card.append(button);}
         }
         if(branchEditing===branch.id) card.append($('branch_form'));
         tr.append(card);list.append(tr);
     }
+    const count=list.children.length;
+    $('branch_results').textContent=focused ? 'Local seleccionado' : count ? count+' '+(count===1 ? 'local' : 'locales')+(branchFilter || query ? ' encontrados' : ' guardados') : state.branches.length ? 'No encontramos locales. Probá con otro nombre o dirección.' : 'Todavía no tenés locales. Agregá el primero con «Nuevo local».';
     for(const control of $('branch_form').querySelectorAll('.editor-field input')) control.editorCaptionUpdate?.();
     list.classList.toggle('product-highlighted',Boolean(branchRevealed || focused));
     if(branchEditing==='new') $('branch_form_home').append($('branch_form'));
@@ -174,14 +178,17 @@ async function saveBranch() {
         const state=await shoppingState(),id=$('branch_edit').value || identifier();
         const old=state.branches.find(b => b.id===id);
         const name=$('branch_name').value.trim(),address=$('branch_address').value.trim();
+        const short_name=$('branch_short_name').value.trim().toLocaleUpperCase('es');
         if (!name || !address || name.length>255 || address.length>500) throw new Error('Ingresá el supermercado y la dirección o referencia del local');
-        await queueOperation('branch',{name,address,expected_revision:old?.revision || 0},null,id);
+        if(!/^\p{L}{3}$/u.test(short_name)) throw new Error('El nombre corto debe tener exactamente 3 letras');
+        await queueOperation('branch',{name,address,short_name,expected_revision:old?.revision || 0},null,id);
         branchEditing=null;$('branch_form').hidden=true;
     });
 }
 async function editBranch(id) {
     const branch=(await shoppingState()).branches.find(b => b.id===id);
     $('branch_name').value=branch?.name || ''; $('branch_address').value=branch?.address || '';
+    $('branch_short_name').value=branch?.short_name || '';
     $('branch_edit').value=id;branchEditing=id || 'new';branchMenu=null;
     $('branch_form_title').textContent=id ? 'Editar local' : 'Nuevo local';
     arrangeEditorFields($('branch_form'));$('branch_form').hidden=false;await renderBranchCards();showModule('stores',{scroll:false});revealProductControls($('branch_form'));

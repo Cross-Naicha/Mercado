@@ -21,6 +21,7 @@
         try {
             const response=await serverRequest('/api/maps');
             if(!Array.isArray(response.maps))throw Error('Respuesta de mapas inválida');
+            if(!response.features?.includes('placements')||!response.features?.includes('region_entry'))throw Error('El servidor necesita reiniciarse para guardar cuadrados y extremos de entrada. Tus cambios locales se conservan');
             const remote=new Map(response.maps.map(r=>[r.branch_id,r]));
             const ids=new Set(remote.keys());
             for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k.startsWith(prefix)&&/^[0-9a-f-]{36}$/i.test(k.slice(prefix.length)))ids.add(k.slice(prefix.length));}

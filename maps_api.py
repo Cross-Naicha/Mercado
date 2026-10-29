@@ -17,7 +17,12 @@ class Region(BaseModel):
     name: str=Field(min_length=1,max_length=60)
     color: Literal['#0f7a66','#449b52','#216348','#79b86b','#368b80','#a0c785']='#0f7a66'
     orientation: Literal['horizontal','vertical']='horizontal'
+    entry: Literal['first','last']='first'
     cells: list[int]=Field(max_length=16384)
+
+class Placement(BaseModel):
+    cell: int=Field(ge=0,le=16383)
+    order: int=Field(ge=0,le=100000)
 
 class GridMap(BaseModel):
     version: Literal[2]
@@ -29,6 +34,7 @@ class GridMap(BaseModel):
     cells: list[Literal[0,1]]=Field(max_length=16384)
     shelves: list[Region]=Field(default_factory=list,max_length=16384)
     assignments: dict[str,str]=Field(default_factory=dict)
+    placements: dict[str,Placement]=Field(default_factory=dict)
 
     @model_validator(mode='after')
     def valid_grid(self):
@@ -42,6 +48,8 @@ class GridMap(BaseModel):
                 if cell<0 or cell>=len(self.cells) or self.cells[cell]!=1 or cell in occupied: raise ValueError('Celdas de zona inválidas o superpuestas')
                 occupied.add(cell)
         if len(self.assignments)>100000 or any(not product or len(product)>100 or zone not in ids for product,zone in self.assignments.items()): raise ValueError('Asignación de productos inválida')
+        zones={region.id:set(region.cells) for region in self.shelves}
+        if len(self.placements)>100000 or any(product not in self.assignments or place.cell not in zones[self.assignments[product]] for product,place in self.placements.items()): raise ValueError("El cuadrado debe pertenecer a la region del producto")
         return self
 
 class Update(BaseModel):
@@ -63,7 +71,7 @@ def connection():
 @router.get('')
 def snapshot():
     with connection() as db:
-        return {'maps':[{'branch_id':r['branch_id'],'revision':r['revision'],'map':json.loads(r['payload'])} for r in db.execute('SELECT * FROM grid_maps')]}
+        return {'features':['placements','region_entry'],'maps':[{'branch_id':r['branch_id'],'revision':r['revision'],'map':json.loads(r['payload'])} for r in db.execute('SELECT * FROM grid_maps')]}
 
 @router.put('/{branch_id}')
 def update(branch_id:UUID,body:Update):

@@ -2,6 +2,24 @@
 (function(){
     const el=id=>document.getElementById('map_'+id),api=window.mercadoMapProducts,availability=window.MercadoAvailability;
     let active=false,rows=[],selected=new Set(),currentBranch=null,generation=0,visible=[],pendingZone=null;
+    const menuCells=new Map();
+    async function assignHere(branch,ids,zone){
+        const before=api.context(),target=before.zones.find(g=>g.id===zone);if(!target||before.branch!==branch)return false;
+        // El mapa elige únicamente región; el cuadrado se conserva o se elige en el selector.
+        const destinations=ids.map(id=>{
+            const chosen=menuCells.get(id),saved=before.assignments[id]===zone?before.placements[id]:null;
+            const cell=chosen?.zone===zone?chosen.cell:saved&&target.cells.includes(saved.cell)?saved.cell:null;
+            return [id,cell===null||!target.cells.includes(cell)?null:cell];
+        });
+        if(!await api.assign(branch,ids,zone))return false;
+        const groups=new Map(),current=api.context();
+        for(const [id,cell] of destinations){
+            if(cell===null&&!current.placements[id]||cell!==null&&current.placements[id]?.cell===cell)continue;
+            if(!groups.has(cell))groups.set(cell,[]);groups.get(cell).push(id);
+        }
+        for(const [cell,products] of groups)if(!api.place(branch,products,cell))return false;
+        return true;
+    }
     const assigningProducts=new Set();
     const fields=[['category','product_class','Todas las categorías']];
     const normalize=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('es');
@@ -26,13 +44,15 @@
         if(!active)return;
         const state=api.context();
         el('product_map_empty').hidden=state.ready;
-        if(currentBranch!==state.branch){currentBranch=state.branch;selected.clear();pendingZone=null;el('product_zone_filter').value='';}
+        if(currentBranch!==state.branch){currentBranch=state.branch;menuCells.clear();selected.clear();pendingZone=null;el('product_zone_filter').value='';}
         const availabilityRecords=availability.forBranch(state.branch),recordFor=id=>availabilityRecords[id]||{status:'unknown',confirmed_at:null};
         const zoneIds=new Set(state.zones.map(g=>g.id));
         if(pendingZone!==null&&pendingZone!==''&&!zoneIds.has(pendingZone))pendingZone=null;
+        for(const [id,choice] of menuCells)if(state.assignments[id]!==choice.zone||choice.cell!==null&&!state.zones.find(g=>g.id===choice.zone)?.cells.includes(choice.cell))menuCells.delete(id);
         const assignment=id=>zoneIds.has(state.assignments[id])?state.assignments[id]:'';
         const hideAssigned=el('product_hide_assigned').checked;
-        let candidates=hideAssigned?rows.filter(row=>!assignment(row.id)&&recordFor(row.id).status!=='unavailable'):rows;
+        let candidates=el('product_only_available').checked?rows.filter(row=>recordFor(row.id).status==='available'):rows;
+        if(hideAssigned)candidates=candidates.filter(row=>!assignment(row.id)&&recordFor(row.id).status!=='unavailable');
         for(const [id,field,all] of fields){
             const control=el('product_'+id),values=[...new Set(candidates.map(r=>r[field]).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es',{sensitivity:'base',numeric:true}));
             options(control,values.map(v=>[v,v]),all);
@@ -73,12 +93,21 @@
             assignButton.onclick=async()=>{
                 const target=pendingZone;if(!target||assigningProducts.has(row.id))return;
                 assigningProducts.add(row.id);render();
-                try{if(await api.assign(state.branch,[row.id],target)){selected.delete(row.id);el('availability_feedback').textContent=productLabel(row)+' asignado a '+(state.zones.find(g=>g.id===target)?.name||'la zona elegida')+'.';}else el('availability_feedback').textContent='No se pudo guardar la asignación.';}
+                try{if(await assignHere(state.branch,[row.id],target)){selected.delete(row.id);el('availability_feedback').textContent=productLabel(row)+' asignado a '+(state.zones.find(g=>g.id===target)?.name||'la zona elegida')+'.';}else el('availability_feedback').textContent='No se pudo guardar la asignación.';}
                 catch(error){el('availability_feedback').textContent='No se guardó: '+error.message;}
                 finally{assigningProducts.delete(row.id);render();}
             };
             const actions=document.createElement('div');actions.className='map-product-availability-actions';actions.append(availabilitySelect,assignButton);availabilityField.append(actions,info);
-            entry.append(check,label,zone,edit,availabilityField);list.append(entry);
+            const location=document.createElement('div');location.className='map-cell-controls';
+            const currentZone=state.zones.find(g=>g.id===assignment(row.id)),place=state.placements[row.id];
+            const cellSelect=document.createElement('select');cellSelect.setAttribute('aria-label','Cuadrado de '+productLabel(row));cellSelect.add(new Option('Sin cuadrado',''));for(const [index,cell] of (currentZone?.cells||[]).entries())cellSelect.add(new Option('Cuadrado '+(index+1)+' · F'+(Math.floor(cell/state.cols)+1)+' C'+(cell%state.cols+1),String(cell)));cellSelect.value=place?String(place.cell):'';cellSelect.disabled=!currentZone;
+            cellSelect.onchange=()=>{const cell=cellSelect.value===''?null:Number(cellSelect.value);menuCells.set(row.id,{zone:currentZone.id,cell});if(!api.place(state.branch,[row.id],cell)){menuCells.delete(row.id);el('status').textContent='No se pudo guardar el cuadrado.';}};
+            const field=document.createElement('label');field.className='map-cell-field';const caption=document.createElement('span');caption.textContent='Cuadrado';field.append(caption,cellSelect);
+            const orderControls=document.createElement('div');orderControls.className='map-cell-order';
+            const hint=document.createElement('small');hint.textContent=!currentZone?'Elegí primero una región':place?'Posición '+(place.order+1):'Elegí un cuadrado para ordenar';orderControls.append(hint);location.append(field,orderControls);
+            const peers=Object.keys(state.placements).filter(id=>state.assignments[id]===currentZone?.id&&state.placements[id].cell===place?.cell).sort((a,b)=>state.placements[a].order-state.placements[b].order||a.localeCompare(b));
+            for(const [symbol,move,text] of [['↑',-1,'Subir'],['↓',1,'Bajar']]){const control=document.createElement('button');control.type='button';control.textContent=symbol;control.title=text;control.setAttribute('aria-label',text+' '+productLabel(row));const index=peers.indexOf(row.id);control.disabled=!place||(move<0?index<=0:index>=peers.length-1);control.onclick=()=>api.place(state.branch,[row.id],place.cell,move);orderControls.append(control);}
+            entry.append(check,label,zone,edit,availabilityField,location);list.append(entry);
         }
         if(state.ready&&!visible.length){const empty=document.createElement('p');empty.textContent='No hay productos que coincidan con estos filtros.';list.append(empty);}
         updateSelection();
@@ -111,20 +140,20 @@
     }
     window.addEventListener('resize',workspaceLayout);
     new MutationObserver(workspaceLayout).observe(document.getElementById('panel-maps'),{attributes:true,attributeFilter:['hidden']});
-    function switchView(products){
-        active=products;el('drawing_view').hidden=products;el('products_view').hidden=!products;
-        el('view_draw').setAttribute('aria-pressed',String(!products));el('view_products').setAttribute('aria-pressed',String(products));
-        const context=el('branch').closest('.map-option-card');
-        if(!contextHome){contextHome=document.createComment('Sucursal y vista');context.before(contextHome);}
-        if(products)document.querySelector('.map-product-assignment').prepend(context);
-        else contextHome.after(context);
+    function switchView(view){
+        const products=view==='products',zones=view==='zones';active=products;
+        el('drawing_view').hidden=products||zones;el('products_view').hidden=!products;el('zones_view').hidden=!zones;
+        for(const [id,current] of [['view_draw','draw'],['view_products','products'],['view_zones','zones']])el(id).setAttribute('aria-pressed',String(view===current));
+        const context=el('view_draw').closest('.map-option-card');
+        if(!contextHome){contextHome=document.createComment('Vista del mapa');context.before(contextHome);}
+        if(products)document.querySelector('.map-product-assignment').prepend(context);else contextHome.after(context);
         workspaceLayout();
-        const destination=products?el('product_map_canvas'):el('drawing_map_home');
-        destination.append(el('surface'));
-        api.setReadOnly(products);
+        const destination=products?el('product_map_canvas'):zones?el('zones_map_home'):el('drawing_map_home');destination.append(el('surface'));
+        api.setReadOnly(products||zones);
+        if(zones)el('zones_card').open=true;
         if(products){render();void load();}
     }
-    el('view_draw').onclick=()=>switchView(false);el('view_products').onclick=()=>switchView(true);
+    el('view_draw').onclick=()=>switchView('draw');el('view_products').onclick=()=>switchView('products');el('view_zones').onclick=()=>switchView('zones');
     for(const [id] of fields)el('product_'+id).onchange=render;
     el('product_category').onchange=()=>{
         selected.clear();
@@ -133,21 +162,22 @@
         render();
     };
     el('product_hide_assigned').onchange=()=>{render();const shown=new Set(visible.map(r=>r.id));selected=new Set([...selected].filter(id=>shown.has(id)));render();};
-    el('product_availability_filter').onchange=()=>{selected.clear();render();};
+    el('product_availability_filter').onchange=()=>{el('product_only_available').checked=el('product_availability_filter').value==='available';selected.clear();render();};
+    el('product_only_available').onchange=()=>{el('product_availability_filter').value=el('product_only_available').checked?'available':'';selected.clear();render();};
     el('product_zone_toggle').onclick=()=>{el('product_zone_filter').value='';render();};
     el('product_zone_view').onclick=()=>{
         const zone=api.context().zones.find(g=>g.id===pendingZone);if(!zone)return;
-        selected.clear();for(const [id] of fields)el('product_'+id).value='';el('product_search').value='';el('product_availability_filter').value='';el('product_hide_assigned').checked=false;
+        selected.clear();for(const [id] of fields)el('product_'+id).value='';el('product_search').value='';el('product_hide_assigned').checked=false;
         el('product_zone_filter').add(new Option(zone.name,zone.id));el('product_zone_filter').value=zone.id;render();
     };
     el('product_search').oninput=render;el('product_zone_filter').onchange=render;
-    el('product_reset').onclick=()=>{selected.clear();el('product_availability_filter').value='';el('product_hide_assigned').checked=false;for(const [id] of fields)el('product_'+id).value='';el('product_search').value='';el('product_zone_filter').value='';render();};
+    el('product_reset').onclick=()=>{selected.clear();el('product_only_available').checked=true;el('product_availability_filter').value='available';el('product_hide_assigned').checked=false;for(const [id] of fields)el('product_'+id).value='';el('product_search').value='';el('product_zone_filter').value='';render();};
     el('product_select_all').onchange=event=>{for(const row of visible){if(event.target.checked)selected.add(row.id);else selected.delete(row.id);}render();};
     el('product_clear_selection').onclick=()=>{selected.clear();render();};
     el('product_apply').onclick=async()=>{
         const state=api.context(),ids=[...selected],zone=pendingZone;
         if(!zone||!state.zones.some(g=>g.id===zone))return;
-        if(await api.assign(state.branch,ids,zone)){selected.clear();render();el('status').textContent=ids.length+' productos guardados '+(zone?'en la zona elegida.':'sin zona asignada.');}
+        if(await assignHere(state.branch,ids,zone)){selected.clear();render();el('status').textContent=ids.length+' productos guardados '+(zone?'en la zona elegida.':'sin zona asignada.');}
         else el('status').textContent='No se pudieron guardar las asignaciones. Volvé a intentarlo.';
     };
     el('product_apply_availability').onclick=async()=>{

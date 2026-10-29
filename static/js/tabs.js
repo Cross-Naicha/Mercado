@@ -60,7 +60,9 @@ document.addEventListener('dblclick',event=>{if(event.target.closest('.stock-qui
     };
     const pricesToggle=document.createElement('button');pricesToggle.type='button';pricesToggle.id='prices_mode_toggle';pricesToggle.textContent='$';pricesToggle.title='Activar modo Precios';pricesToggle.setAttribute('aria-label','Modo Precios');pricesToggle.setAttribute('aria-pressed','false');pricesToggle.onclick=()=>setPricesMode(!pricesMode);
     const historyToggle=document.createElement('button');historyToggle.type='button';historyToggle.id='history_mode_toggle';historyToggle.textContent='↗';historyToggle.title='Modo Histórico';historyToggle.setAttribute('aria-label','Modo Histórico');historyToggle.setAttribute('aria-pressed','false');historyToggle.onclick=()=>setHistoryMode(!historyMode);
-    floatingActions.append(scrollTopButton,historyToggle,pricesToggle,newProductButton);floatingMenu.append(floatingActions,floatingToggle);panels.get('products').append(floatingMenu);
+    const organizeToggle=document.createElement('button');organizeToggle.type='button';organizeToggle.id='walk_organize_toggle';organizeToggle.innerHTML='<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 19V5m-4 4 4-4 4 4M16 5v14m-4-4 4 4 4-4"/></svg>';organizeToggle.title='Modo Organizar';organizeToggle.setAttribute('aria-label','Modo Organizar');organizeToggle.setAttribute('aria-pressed','false');organizeToggle.hidden=true;organizeToggle.onclick=()=>window.setWalkOrganize?.();
+    floatingActions.append(scrollTopButton,organizeToggle,historyToggle,pricesToggle,newProductButton);floatingMenu.append(floatingActions,floatingToggle);panels.get('products').append(floatingMenu);
+    const mapBack=document.createElement('button');mapBack.id='walk_back_map';mapBack.type='button';mapBack.textContent='<';mapBack.title='Volver al mapa';mapBack.setAttribute('aria-label','Volver al mapa');mapBack.hidden=true;floatingMenu.append(mapBack);mapBack.addEventListener('click',closeFloatingMenu);
     floatingActions.addEventListener('click',event=>{if(event.target.closest('button')) closeFloatingMenu();});
     document.addEventListener('click',event=>{if(!floatingMenu.contains(event.target)) closeFloatingMenu();});
     floatingMenu.addEventListener('keydown',event=>{if(event.key==='Escape') {closeFloatingMenu();floatingToggle.focus();}});
@@ -77,7 +79,7 @@ document.addEventListener('dblclick',event=>{if(event.target.closest('.stock-qui
     returnProductsButton.type='button';returnProductsButton.id='return_products_floating';returnProductsButton.textContent='<';
     returnProductsButton.setAttribute('aria-label','Volver a Productos');returnProductsButton.title='Volver a Productos';
     let catalogModule='products';
-    returnProductsButton.onclick=()=>showModule(catalogModule);document.body.append(returnProductsButton);
+    returnProductsButton.onclick=()=>{if(window.productActionReturn)void window.productActionReturn();else showModule(catalogModule);};document.body.append(returnProductsButton);
     const stockMenu=document.createElement('div');stockMenu.id='stock_floating_menu';
     const stockActions=document.createElement('div');stockActions.id='stock_floating_actions';stockActions.inert=true;
     const stockToggle=document.createElement('button');stockToggle.id='stock_floating_toggle';stockToggle.type='button';stockToggle.textContent='+';stockToggle.setAttribute('aria-label','Mostrar acciones de stock');stockToggle.setAttribute('aria-expanded','false');stockToggle.setAttribute('aria-controls',stockActions.id);
@@ -101,7 +103,7 @@ document.addEventListener('dblclick',event=>{if(event.target.closest('.stock-qui
     const tabStrip=document.createElement('div');tabStrip.className='nav-sections';nav.append(tabStrip);
     for(const [id,label] of [...definitions.map(([id,label]) => [id,label]),['settings','Ajustes']]) {
         const button=document.createElement('button');button.id='tab-'+id;button.type='button';button.textContent=label;button.setAttribute('role','tab');button.setAttribute('aria-controls','panel-'+id);
-        button.onclick=() => showModule(id);
+        button.onclick=() => {window.productActionReturn=null;showModule(id);};
         if(id==='settings') {
             button.textContent='';button.title='Ajustes';button.setAttribute('aria-label','Ajustes');
             button.innerHTML='<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9.5 3-.6 2.1-1.8 1-2.2-.5-2.4 4.2L4.1 11v2l-1.6 1.2 2.4 4.2 2.2-.5 1.8 1 .6 2.1h5l.6-2.1 1.8-1 2.2.5 2.4-4.2-1.6-1.2v-2l1.6-1.2-2.4-4.2-2.2.5-1.8-1-.6-2.1z"/><circle cx="12" cy="12" r="3.2"/></svg>';
@@ -126,8 +128,12 @@ document.addEventListener('dblclick',event=>{if(event.target.closest('.stock-qui
     menuPreferences.append(menuLegend,menuHelp,menuChoices);sync.append(menuPreferences);
     for(const panel of panels.values()) {const title=panel.querySelector('h1,h2');if(title) title.classList.add('module-title');}
     const sectionModules={search_section:'products',compare_section:'compare',instances_section:'purchase',cart_section:'cart',stock_section:'stock',list_section:'list',assistant_section:'scan',stores_section:'stores',register_section:'new',location_form:'stores'};
+    let currentModule=null;
     window.showModule=function(id,{scroll=true,focus=false}={}) {
         if(!panels.has(id)) return;
+        if(currentModule!==id&&['products','walk'].includes(currentModule)){window.resetCatalogModes?.();document.dispatchEvent(new CustomEvent('mercado-module-leave',{detail:{id:currentModule}}));}
+        currentModule=id;
+        organizeToggle.hidden=id!=='walk';mapBack.hidden=id!=='walk'||!document.getElementById('walk_zone').value;floatingMenu.classList.toggle('has-map-back',!mapBack.hidden);
         document.body.classList.toggle('map-full-width',id==='maps');
         closeFloatingMenu();closeStockMenu();
         if(id==='products'||id==='walk') {catalogModule=id;panels.get(id).append(floatingMenu);}

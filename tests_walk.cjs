@@ -19,6 +19,7 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
 
  await page.evaluate(async({product,branch})=>{
  await localTransaction(['catalog','shopping_cache'],tx=>{tx.objectStore('catalog').put(product);tx.objectStore('shopping_cache').put({id:'snapshot',branches:[branch],barcodes:[],documents:[]});});
+ await MercadoAvailability.set(branch.id,[product.id,...(typeof other==='undefined'?[]:[other.id])],'available');
  localStorage.setItem('mercado-branch-map-v1:'+branch.id,JSON.stringify({version:2,rows:16,cols:16,precision:1,cells:Array.from({length:256},(_,i)=>i<2?1:0),shelves:[{id:'a',name:'Almacén',color:'#0f7a66',cells:[0]},{id:'b',name:'Bebidas',color:'#449b52',cells:[1]}],assignments:{[product.id]:'a'}}));
  },{product,branch});
  await page.locator('#tab-walk').click();await page.locator('#walk_branch option[value="'+branch.id+'"]').waitFor({state:'attached'});await page.locator('#active_branch_toggle').click();await page.locator('#active_branch_select').selectOption(branch.id);await page.waitForFunction(()=>document.getElementById('active_branch_picker').hidden);
@@ -37,7 +38,8 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
  assert.equal(await page.locator('#walk_cards .product-card').count(),1);
  assert.equal(await page.locator('#walk_controls').isVisible(),false);
  assert.equal(await page.locator('#walk_status').isVisible(),false);
- assert.equal(await page.locator('#walk_filter_mode').innerText(),'Por fecha');
+ assert.equal(await page.locator('#walk_filter_mode').innerText(),'Por recorrido');
+ await page.locator('#walk_filter_mode').click();assert.equal(await page.locator('#walk_filter_mode').innerText(),'Por fecha');
  await page.locator('#walk_filter_mode').click();assert.equal(await page.locator('#walk_filter_mode').innerText(),'Por tipo');
  await page.locator('#walk_filters').getByRole('button',{name:'Almacén',exact:true}).click();
  assert.equal(await page.locator('#walk_cards .product-card').count(),1);
@@ -48,7 +50,7 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
  await page.locator('#walk_filter_mode').click();assert.equal(await page.locator('#walk_filter_mode').innerText(),'Por marca');
  await page.locator('#walk_filters').getByRole('button',{name:'Prueba',exact:true}).click();
  assert.equal(await page.locator('#walk_cards .product-card').count(),1);
- await page.locator('#walk_clear').click();assert.equal(await page.locator('#walk_filter_mode').innerText(),'Por fecha');
+ await page.locator('#walk_clear').click();assert.equal(await page.locator('#walk_filter_mode').innerText(),'Por recorrido');
 
  await page.locator('#walk_search').fill('inexistente');assert.equal(await page.locator('#walk_cards .product-card').count(),0);
  await page.locator('#walk_search').fill('');await page.locator('#walk_cards .product-card').click();assert.equal(await page.locator('#walk_cards .product-row-actions').isVisible(),true);await page.locator('#walk_cards button').first().click();await page.locator('#panel-products').waitFor({state:'visible'});

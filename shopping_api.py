@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 from fastapi import HTTPException
-from pydantic import BaseModel,Field
+from pydantic import BaseModel,Field,field_validator
 import functions
 
 
@@ -16,6 +16,17 @@ class Branch(BaseModel):
     name: str = Field(min_length=1,max_length=255)
     address: str = Field(min_length=1,max_length=500)
     expected_revision: int = Field(ge=0)
+    short_name: str | None = None
+
+    @field_validator('short_name')
+    @classmethod
+    def validate_short_name(cls, value):
+        if value is None:
+            return value
+        value = value.strip().upper()
+        if len(value) != 3 or not value.isalpha():
+            raise ValueError('El nombre corto debe tener exactamente 3 letras')
+        return value
 
 
 class Node(BaseModel):
@@ -88,8 +99,8 @@ def apply_shopping(c,kind,entity,payload):
         c.execute('SELECT revision FROM store_branches WHERE id=%s FOR UPDATE',(entity,))
         old=c.fetchone()
         if (old['revision'] if old else 0)!=payload.expected_revision: raise HTTPException(409,'La sucursal cambió en otro dispositivo')
-        if old: c.execute('UPDATE store_branches SET name=%s,address=%s,location_confirmed=TRUE,revision=revision+1 WHERE id=%s',(payload.name,payload.address,entity))
-        else: c.execute('INSERT INTO store_branches(id,name,address,location_confirmed) VALUES(%s,%s,%s,TRUE)',(entity,payload.name,payload.address))
+        if old: c.execute('UPDATE store_branches SET name=%s,address=%s,short_name=COALESCE(%s,short_name),location_confirmed=TRUE,revision=revision+1 WHERE id=%s',(payload.name,payload.address,payload.short_name,entity))
+        else: c.execute('INSERT INTO store_branches(id,name,address,short_name,location_confirmed) VALUES(%s,%s,%s,%s,TRUE)',(entity,payload.name,payload.address,payload.short_name or ''))
         return
     data=DOCUMENTS[payload.kind](**payload.data)
     owner=str(payload.owner_id)

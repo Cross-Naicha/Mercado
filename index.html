@@ -5,7 +5,7 @@
     <title>Mercado domestico</title>
     <link rel="icon" href="data:,">
     
-    <link rel="stylesheet" href="/static/css/style.css?v=334">
+    <link rel="stylesheet" href="/static/css/style.css?v=365">
     <link rel="manifest" href="/static/manifest.json">
 
     <meta name="theme-color" content="#2c3e50">
@@ -366,25 +366,34 @@
     <label>Buscar un producto por foto <input type="file" accept="image/*" capture="environment" onchange="suggestPhoto(this.files[0])"></label>
     <div id="photo_results"></div>
     <h2>Supermercados y locales</h2>
-    <button type="button" onclick="editBranch('')">Nuevo local</button>
+    <p class="stores-intro">Tus lugares de compra, a mano. Elegí un local para empezar o agregá uno nuevo.</p>
+    <button type="button" class="stores-add" onclick="editBranch('')">+ Nuevo local</button>
     <div id="branch_filters" class="catalog-filters"></div>
-    <input id="branch_search" type="search" placeholder="Buscar supermercado o local" oninput="renderBranchCards()" autocomplete="off">
-    <table><tbody id="branch_cards"></tbody></table>
+    <input id="branch_search" type="search" aria-label="Buscar supermercado o dirección" placeholder="Buscar supermercado o dirección…" oninput="renderBranchCards()" autocomplete="off">
+    <p id="branch_results" class="stores-results" role="status"></p>
+    <table class="stores-list" aria-label="Locales guardados"><tbody id="branch_cards"></tbody></table>
     <div id="branch_form_home">
     <form id="branch_form" hidden>
         <h2 id="branch_form_title">Nuevo local</h2>
         <select id="branch_edit" hidden><option value="">Nuevo local</option></select>
         <label>Supermercado <input id="branch_name" type="text" maxlength="255" required></label>
         <label>Local (dirección o referencia) <input id="branch_address" type="text" maxlength="500" required></label>
-        <button type="button" onclick="saveBranch()">Guardar local</button>
+        <label>Nombre corto (3 letras) <input id="branch_short_name" type="text" minlength="3" maxlength="3" required autocomplete="off" placeholder="Ej.: CEN" aria-describedby="branch_short_name_help"></label>
+        <p id="branch_short_name_help">Se muestra junto a la tuerca para identificar el local.</p>
+        <button type="button" onpointerdown="event.preventDefault()" onclick="saveBranch()">Guardar local</button>
         <button type="button" class="editor-floating-back" aria-label="Volver a los locales sin guardar" onclick="closeBranchForm()">&lt;</button>
     </form>
     </div>
-    <h2>Ubicaciones y recorrido</h2>
-    <label>Local para esta compra <select id="route_branch" onchange="choosePurchaseBranch(this.value).then(loadMap)"><option value="">Elegí local</option></select></label>
-    <label><input id="cold_last" type="checkbox" checked onchange="renderShopping()">Recoger refrigerados/congelados al final</label>
-    <div id="route_choices"></div><div id="route_result"></div>
-    <details id="location_form"><summary>Registrar o corregir ubicación de un producto</summary>
+    <section id="store_route" aria-labelledby="store_route_title">
+    <h2 id="store_route_title">Ubicaciones y recorrido</h2>
+    <p class="stores-intro">Organizá tu compra por pasillo y encontrá cada producto en su lugar.</p>
+    <div class="route-settings">
+    <label class="route-local">Local para esta compra <select id="route_branch" onchange="choosePurchaseBranch(this.value).then(loadMap)"><option value="">Elegí local</option></select></label>
+    <label class="route-cold"><input id="cold_last" type="checkbox" checked onchange="renderShopping()"><span>Dejar los fríos para el final<small>Refrigerados y congelados, al terminar el recorrido.</small></span></label>
+    </div>
+    <div id="route_choices" aria-label="Productos para el recorrido"></div>
+    <div class="route-preview"><h3>Tu recorrido</h3><div id="route_result"></div></div>
+    <details id="location_form" class="route-disclosure"><summary><span>Ubicación de productos<small>Registrá o corregí el pasillo, estante y referencia.</small></span></summary>
         <label>Producto <select id="location_product"><option value="">Elegí producto</option></select></label>
         <label>Pasillo <input id="location_aisle" type="text" maxlength="80"></label>
         <label>Orden del pasillo <input id="location_order" type="number" min="0" max="10000" value="1"></label>
@@ -396,7 +405,7 @@
         <button type="button" onclick="editingLocation=null;notice('La próxima ubicación se guardará como adicional')">Agregar otra ubicación</button>
         <ul id="location_list"></ul>
     </details>
-    <details><summary>Mapa de conexiones transitables</summary>
+    <details class="route-disclosure"><summary><span>Conexiones del recorrido<small>Definí los pasos entre la entrada, los pasillos y las cajas.</small></span></summary>
         <p>Nombrá puntos de paso (entrada, cruces, sectores y cajas). Un punto por línea: nombre | etiqueta. Una conexión por línea: desde | hasta | metros. Las conexiones permiten caminar en ambos sentidos. Dibujá solo pasos transitables.</p>
         <label>Puntos <textarea id="map_nodes" rows="6" placeholder="entrada | Entrada&#10;p1 | Pasillo 1&#10;cajas | Cajas"></textarea></label>
         <label>Conexiones <textarea id="map_edges" rows="6" placeholder="entrada | p1 | 10&#10;p1 | cajas | 15"></textarea></label>
@@ -405,18 +414,19 @@
         <button type="button" onclick="saveMap()">Guardar mapa</button>
         <p>La ruta respeta las conexiones. Recoger fríos al final no impide pasar por ese pasillo antes.</p>
     </details>
-    <details><summary>Productos equivalentes</summary>
+    <details class="route-disclosure"><summary><span>Productos equivalentes<small>Agrupá alternativas para una misma necesidad.</small></span></summary>
         <label>Crear o editar grupo <select id="group_edit" onchange="editGroup(this.value)"><option value="">Crear grupo nuevo</option></select></label>
         <label>Necesidad que cubren <input id="group_name" type="text" maxlength="120" placeholder="Ej.: leche"></label>
         <label>Alternativas <select id="group_products" multiple size="6"></select></label>
         <button type="button" onclick="saveGroup()">Guardar equivalencias</button>
     </details>
+    </section>
 
     <!-- Registro -->
     <h1 id="map_section" class="section">Mapa del súper</h1>
     <section class="map-editor" aria-label="Editor del mapa">
         <label>Sucursal <select id="map_branch"><option value="">Elegí una sucursal</option></select></label>
-        <div class="map-tools" aria-label="Vistas del mapa"><button type="button" id="map_view_draw" aria-pressed="true">Dibujar</button><button type="button" id="map_view_products" aria-pressed="false">Asignar</button></div>
+        <div class="map-tools" aria-label="Vistas del mapa"><button type="button" id="map_view_draw" aria-pressed="true">Dibujar</button><button type="button" id="map_view_products" aria-pressed="false">Asignar</button><button type="button" id="map_view_zones" aria-pressed="false">Zonas</button></div>
         <label class="map-phone-zoom">Vista del mapa <select id="map_phone_zoom"><option value="0.25">Reducir a ¼</option><option value="0.5">Reducir a ½</option><option value="0.75">Reducir a ¾</option><option value="1" selected>Ajustar a pantalla</option><option value="1.5">Ampliar 1,5×</option><option value="2">Ampliar 2×</option><option value="3">Ampliar 3×</option><option value="4">Ampliar 4×</option></select></label>
         <div id="map_drawing_view">
         <p id="map_help">Tocá una celda para alternar entre espacio libre y góndola. También podés arrastrar: cada celda cambia una sola vez por trazo.</p>
@@ -437,6 +447,17 @@
                 <button type="button" id="map_expand">Agregar espacio</button>
             </div>
             <p class="map-note">Las coordenadas empiezan en 1. Insertar antes de la fila 5 desplaza la fila 5 y las siguientes. Para agregar al final, elegí la posición siguiente a la última. Hasta 128 filas y 128 columnas. Podés usar Deshacer.</p>
+        </details>
+        <details class="map-reduce"><summary>Reducir mapa</summary>
+            <p>Quitá filas o columnas desde un borde. El tamaño de las celdas se conserva.</p>
+            <div class="map-tools">
+                <label>Lado <select id="map_reduce_side"><option value="bottom">Abajo · filas</option><option value="top">Arriba · filas</option><option value="right">Derecha · columnas</option><option value="left">Izquierda · columnas</option></select></label>
+                <label>Cantidad <input id="map_reduce_count" type="number" min="1" max="15" step="1" value="1" inputmode="numeric" style="width:80px"></label>
+                <button type="button" id="map_reduce">Quitar espacio</button>
+            </div>
+            <p id="map_reduce_preview" class="map-note" role="status"></p>
+            <label id="map_reduce_content_label" hidden><input id="map_reduce_content" type="checkbox"> Recortar también las góndolas y zonas afectadas</label>
+            <p class="map-note">Debe quedar al menos una fila y una columna. Podés revertir el recorte con Deshacer.</p>
         </details>
         <div id="map_naming" hidden>
             <p>Seleccioná las celdas de una góndola tocando o arrastrando. En otro trazo, volvé a tocar una celda para quitarla. Podés formar una L, una U o cualquier figura; los espacios libres no cambian.</p>
@@ -470,8 +491,8 @@
             <div class="map-tools">
                 <label>Categoría <select id="map_product_category"></select></label>
                 <label>Ubicación <span id="map_product_zone_picker"><select id="map_product_zone_filter"></select></span><button type="button" id="map_product_zone_toggle" class="map-zone-filter-button" aria-pressed="false" hidden></button><button type="button" id="map_product_zone_view" hidden>Ver zona</button></label>
-                <label class="map-availability-filter">Disponibilidad <select id="map_product_availability_filter"><option value="">Todas</option><option value="unknown">Sin confirmar</option><option value="available">Disponible</option><option value="unavailable">No disponible</option></select></label>
-                <div class="map-product-filter-actions"><label class="map-hide-assigned"><input id="map_product_hide_assigned" type="checkbox"> Pendientes</label><button type="button" id="map_product_reset">Limpiar filtros</button></div>
+                <label class="map-availability-filter">Disponibilidad <select id="map_product_availability_filter"><option value="">Todas</option><option value="unknown">Sin confirmar</option><option value="available" selected>Disponible</option><option value="unavailable">No disponible</option></select></label>
+                <div class="map-product-filter-actions"><label class="map-hide-assigned"><input id="map_product_hide_assigned" type="checkbox"> Pendientes</label><label class="map-hide-assigned"><input id="map_product_only_available" type="checkbox" checked> Disponibles</label><button type="button" id="map_product_reset">Limpiar filtros</button></div>
                 <label class="map-select-results"><input id="map_product_select_all" type="checkbox"> Seleccionar resultados</label>
             </div>
             <p id="map_product_help" role="status"></p>
@@ -502,13 +523,16 @@
     <div id="walk_zones" class="walk-zones" role="group" aria-label="Zonas del supermercado" hidden></div>
     <section id="walk_products" hidden aria-label="Productos de la zona">
         <h2 id="walk_title" class="walk-zone-title" tabindex="-1"></h2>
-        <div id="walk_search_controls">
-            <button id="walk_filter_mode" type="button">Por fecha</button>
-            <input id="walk_search" type="search" placeholder="Buscar producto..." aria-label="Buscar producto en esta zona">
-            <button id="walk_clear" class="clear-filters" type="button" aria-label="Limpiar búsqueda o volver" title="Limpiar búsqueda o volver">&lt;</button>
+        <div id="walk_route" class="walk-route">
+            <div class="walk-cardinal-axis"><span id="walk_cardinal_start"></span><span aria-hidden="true">↔</span><span id="walk_cardinal_end"></span></div>
+            <div id="walk_direction_map" class="walk-direction-map" aria-label="Cuadrados de la región"></div>
+            <p id="walk_direction_status" role="status"></p>
         </div>
-        <div id="walk_filters" class="catalog-filters"></div>
+        <div id="walk_order_changes" class="walk-order-changes" hidden><span>Cambios sin guardar</span><button id="walk_order_save" type="button">Guardar cambios</button><button id="walk_order_discard" type="button">Descartar</button></div>
+        <p id="walk_order_status" role="status"></p>
         <div id="walk_cards" class="walk-cards"></div>
+        <div class="walk-section-navigation"><button id="walk_previous_section" type="button">← Anterior</button><span id="walk_section_progress"></span><button id="walk_next_section" type="button">Siguiente sección →</button></div>
+        <p id="walk_route_complete" role="status" hidden>Recorrido terminado</p>
     </section>
     <h1 id="register_section" class="section">Registro</h1>
     <input id="new_barcode" type="hidden">
@@ -574,22 +598,23 @@ window.updateMercadoApp=async function() {
     } catch(error) {status.textContent='No se pudo actualizar: '+error.message+'. Tus datos siguen guardados.';}
 };
 </script>
-<script src="/static/js/tabs.js?v=334"></script>
-<script src="/static/js/main.js?v=334"></script>
-<script src="/static/js/history.js?v=334"></script>
-<script src="/static/js/offline.js?v=334"></script>
-<script src="/static/js/cart.js?v=334"></script>
-<script src="/static/js/stock.js?v=334"></script>
-<script src="/static/js/shopping.js?v=334"></script>
-<script src="/static/js/availability.js?v=334"></script>
-<script src="/static/js/maps.js?v=334"></script>
-<script src="/static/js/map-products.js?v=334"></script>
-<script src="/static/js/map-sync.js?v=334"></script>
-<script src="/static/js/map-panels.js?v=334"></script>
-<script src="/static/js/map-floating.js?v=334"></script>
-<script src="/static/js/map-selects.js?v=334"></script>
-<script src="/static/js/walk.js?v=334"></script>
-<script src="/static/js/active-branch.js?v=334"></script>
+<script src="/static/js/tabs.js?v=365"></script>
+<script src="/static/js/main.js?v=365"></script>
+<script src="/static/js/history.js?v=365"></script>
+<script src="/static/js/offline.js?v=365"></script>
+<script src="/static/js/cart.js?v=365"></script>
+<script src="/static/js/stock.js?v=365"></script>
+<script src="/static/js/shopping.js?v=365"></script>
+<script src="/static/js/availability.js?v=365"></script>
+<script src="/static/js/maps.js?v=365"></script>
+<script src="/static/js/map-products.js?v=365"></script>
+<script src="/static/js/map-sync.js?v=365"></script>
+<script src="/static/js/map-panels.js?v=365"></script>
+<script src="/static/js/map-help.js?v=365"></script>
+<script src="/static/js/map-floating.js?v=365"></script>
+<script src="/static/js/map-selects.js?v=365"></script>
+<script src="/static/js/walk.js?v=365"></script>
+<script src="/static/js/active-branch.js?v=365"></script>
 
 </html>
 

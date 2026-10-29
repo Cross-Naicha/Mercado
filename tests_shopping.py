@@ -15,6 +15,11 @@ def main():
         response,_=send('product',{'product':'TEST alternativa','brand':'Temporal','presentation':'1'},second);assert response.status_code==200
         response,_=send('barcode',{'product_id':second,'code':code});assert response.status_code==409
         response,_=send('branch',{'name':'TEST sucursal','address':'Local temporal','expected_revision':0},branch);assert response.status_code==200,response.text
+        response,_=send('branch',{'name':'TEST sucursal','address':'Local temporal','short_name':'ce1','expected_revision':1},branch);assert response.status_code==422,response.text
+        response,_=send('branch',{'name':'TEST sucursal','address':'Local temporal','short_name':'cen','expected_revision':1},branch);assert response.status_code==200,response.text
+        response,_=send('branch',{'name':'TEST sucursal','address':'Local temporal','expected_revision':2},branch);assert response.status_code==200,response.text
+        saved=next(b for b in client.get('/api/shopping').json()['branches'] if b['id']==branch)
+        assert saved['short_name']=='CEN' and saved['revision']==3,saved
         map={'branch_id':branch,'nodes':[{'id':'e','label':'Entrada'},{'id':'a','label':'Pasillo 1'},{'id':'f','label':'Fríos'},{'id':'c','label':'Cajas'}],'edges':[{'source':'e','target':'a','distance':'10'},{'source':'a','target':'f','distance':'5'},{'source':'f','target':'c','distance':'10'}],'entrance':'e','checkout':'c'}
         response,_=send('shopping_document',{'kind':'map','owner_id':branch,'expected_revision':0,'data':map},branch);assert response.status_code==200,response.text
         response,_=send('shopping_document',{'kind':'map','owner_id':branch,'expected_revision':0,'data':map},branch);assert response.status_code==409

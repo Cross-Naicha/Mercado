@@ -151,3 +151,41 @@ Recorrer usa el supermercado elegido desde la S de la barra superior. Las zonas 
 Sincronizar mapas está en Ajustes → Mapas y asignaciones, junto con el estado y la resolución de conflictos. Se puede ocultar Mapa en las preferencias del menú del teléfono y continuar sincronizando sin abrir el editor.
 
 El botón Sincronizar ahora de Ajustes sincroniza los pendientes y el catálogo, y luego los mapas, sus asignaciones y la disponibilidad. No hay un botón separado para mapas; el estado y los conflictos siguen visibles en Ajustes.
+
+## Nombre corto del local
+
+En Supermercados, al crear o editar un local, completar Nombre corto con exactamente tres letras. Se guarda en mayúsculas y aparece en el botón junto a Ajustes; el nombre completo y la dirección siguen disponibles al elegir el local. Los locales anteriores muestran S hasta completar el campo. Antes de usar esta versión, ejecutar `python migrate_branch_short_name.py` y reiniciar el servidor si ya estaba abierto. La migración crea un respaldo y conserva los locales existentes. Clientes anteriores que no envían el campo conservan el nombre corto guardado.
+
+## Cuadrados y sentido del recorrido
+
+Mapa → Asignar permite tocar una región como destino para uno o varios productos. El mapa no elige cuadrados: se seleccionan exclusivamente desde el desplegable Cuadrado de cada producto. Asignar conserva el cuadrado elegido si sigue perteneciendo a la región de destino. Cada producto tiene un selector de cuadrado dentro de su región y botones ↑ ↓ para ordenar sus vecinos. Los números siguen izquierda a derecha y arriba hacia abajo. Los productos anteriores conservan la región y quedan Sin cuadrado hasta ubicarlos.
+
+Recorrer abre por defecto Por recorrido: cuadrados en orden y productos según su posición. Entrar por 1, Entrar por el último e Invertir sentido cambian el sentido sin modificar las asignaciones. El croquis numerado destaca el cuadrado del producto seleccionado. Por fecha, Por tipo y Por marca siguen disponibles; para retomar el orden físico elegir Por recorrido. Los productos sin cuadrado aparecen detrás de los ubicados, y los revisados con el ojo siempre al fondo. El sentido se recuerda por región durante la sesión.
+
+Las ubicaciones se guardan y sincronizan dentro del mapa con sus revisiones habituales; se incluyen en exportar/importar. No requiere migración de MySQL. Actualizar también el servidor y los otros dispositivos antes de editar mapas. Refinar un cuadrado lleva su ubicación al primero de sus subcuadrados; ampliar conserva las coordenadas relativas y recortar o borrar celdas retira solo las ubicaciones que dejan de existir, conservando la región cuando sigue disponible. Pruebas: python tests_maps.py y node tests_cell_route.cjs.
+
+Mapa usa únicamente la S superior para elegir supermercado. Sus vistas son Dibujar, Asignar y Zonas. Zonas muestra el mapa bloqueado y la tarjeta Zonas y etiquetas existentes expandida; permite editar nombres, colores y orientación. Los campos de nombre mantienen altura fija. La ayuda en la esquina superior derecha reúne las explicaciones. Verificación: node tests_zones_view.cjs.
+
+En Zonas, el mapa se muestra completo expandiendo su ventana en altura. Quitar todas las zonas aparece al final de la grilla y abarca las posiciones restantes de su fila. Guardado local e Importar/exportar ya no se muestran como menús.
+
+Recorrer agrupa las tarjetas con subtítulos por cuadrado. Las flechas de la esquina superior derecha permiten ordenar productos dentro de su cuadrado en modo Por recorrido, respetando el sentido elegido. Los cambios quedan como borrador hasta Guardar orden; Descartar recupera el orden vigente. Guardar actualiza el mismo orden que utiliza Asignar y se sincroniza con los mapas. Si las ubicaciones cambiaron mientras se ordenaba, se conserva el borrador y se pide revisarlo en lugar de sobrescribirlo. Prueba: node tests_walk_order.cjs.
+
+En Recorrer, el mapa general indica Norte arriba, Sur abajo, Oeste a la izquierda y Este a la derecha. La tarjeta de entrada gira las regiones predominantemente verticales para verlas en horizontal, con Norte a la izquierda y Sur a la derecha; las horizontales muestran Oeste y Este. Se conservan la forma, los números de los cuadrados y el orden guardado; invertir el sentido solo cambia el recorrido. Prueba: node tests_route_cardinals.cjs.
+
+El sentido en Recorrer se elige tocando el primer o el último cuadrado del croquis. El extremo seleccionado queda resaltado. También funcionan Enter y Espacio; se retiraron los botones separados de entrada e inversión.
+
+El menú flotante de Recorrer incluye ↕ Organizar. Este modo, excluyente con Precios e Histórico, muestra las flechas de orden y el selector de cuadrado de cada producto. Fuera de Organizar, ambos controles se ocultan. Asignar, reasignar, quitar cuadrado y ordenar quedan en borrador hasta Guardar cambios; Descartar recupera lo guardado. Los cambios usan las ubicaciones compartidas por toda la aplicación y se sincronizan con los mapas. Pruebas: node tests_organize_mode.cjs y node tests_walk_order.cjs.
+
+Organizar usa tonos rojos y oculta los precios. El selector de cuadrado comparte el desplegable de la aplicación. Recorrer muestra directamente el orden físico, sin barra de filtro/búsqueda; el acceso Volver al mapa queda flotante sobre el menú de modos.
+
+Al salir de Productos o Recorrer se desactivan Precios, Histórico y Organizar; la sección siguiente y el regreso muestran el modo normal. Los cambios guardados se conservan. Los borradores de Organizar no se pierden, pero solo vuelven a mostrarse al activar Organizar. Los modos tampoco se restauran al recargar la app. Verificación: node tests_section_modes.cjs.
+
+Las acciones abiertas desde Recorrer recuerdan la región y el punto de lectura. Mismo precio, guardar/cancelar precio de góndola, cerrar opciones y completar una carga al carrito regresan allí automáticamente. Las acciones iniciadas desde Productos conservan su navegación habitual. Elegir otra sección desde la barra superior cancela ese regreso. Verificación: node tests_walk_return.cjs.
+
+## Recorrido entre regiones
+
+Mapa → Zonas numera las regiones en el orden de recorrido. Seleccionar una zona permite adelantarla o retrasarla con ↑ ↓ y elegir su extremo de entrada; ambas opciones se guardan automáticamente con el mapa de esa sucursal. Recorrer muestra Anterior y Siguiente sección, aplica el extremo configurado al entrar y conserva los cambios pendientes de Organizar al pasar de región. En la última sección, Terminar recorrido muestra Recorrido terminado sin volver al inicio. Siempre se puede usar el mapa para saltar a otra zona. Los mapas anteriores usan el orden existente de sus zonas y entrada por el primer cuadrado. Actualizar la aplicación en todos los dispositivos para conservar la configuración al editar. Verificación: node tests_section_route.cjs y python tests_maps.py.
+
+En Zonas, Guardar confirma en conjunto nombre, color, orientación, orden de recorrido y extremo de entrada. Está deshabilitado si no hay cambios. Los controles mantienen un borrador sin alterar lo guardado; Descartar lo restablece. Las ubicaciones de los productos se conservan al renombrar y reordenar. Prueba: node tests_zone_save.cjs.
+
+El iniciador utiliza mercado_server.py para recargar únicamente los módulos Python de la aplicación, evitando recorrer .git y sus archivos temporales. La sincronización de mapas comprueba que el servidor admite cuadrados y extremos de entrada antes de enviar o recibir cambios; si está desactualizado, conserva la copia local y pide reiniciarlo. Verificación: python tests_maps.py y node tests_map_features.cjs.

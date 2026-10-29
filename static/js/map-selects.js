@@ -30,8 +30,9 @@
     }
     menu.addEventListener('toggle',()=>{if(!menu.matches(':popover-open'))current?.button.setAttribute('aria-expanded','false');});
     menu.onkeydown=event=>{const items=[...menu.querySelectorAll('button:not(:disabled)')],i=items.indexOf(document.activeElement);if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){event.preventDefault();items[event.key==='Home'?0:event.key==='End'?items.length-1:(i+(event.key==='ArrowDown'?1:-1)+items.length)%items.length]?.focus();}};
-    function refresh(){frame=null;root.querySelectorAll('select:not(#map_branch)').forEach(update);if(current&&!current.select.isConnected)menu.hidePopover();}
+    function refresh(){frame=null;root.querySelectorAll('select:not(#map_branch)').forEach(update);document.getElementById('walk_cards')?.querySelectorAll('select').forEach(update);if(current&&!current.select.isConnected)menu.hidePopover();}
     function schedule(){if(!frame)frame=requestAnimationFrame(refresh);}
-    new MutationObserver(changes=>{if(changes.some(c=>c.target.nodeName==='SELECT'||c.target.closest?.('select')||[...c.addedNodes].some(n=>n.nodeType===1&&(n.matches('select')||n.querySelector('select')))))schedule();}).observe(root,{childList:true,subtree:true,attributes:true,attributeFilter:['disabled']});
-    document.addEventListener('mercado-map-change',schedule);window.addEventListener('resize',()=>{if(menu.matches(':popover-open'))menu.hidePopover();});root.addEventListener('scroll',()=>{if(menu.matches(':popover-open'))positionMenu();},{passive:true});refresh();
+    const observer=new MutationObserver(changes=>{if(changes.some(c=>c.target.nodeName==='SELECT'||c.target.closest?.('select')||[...c.addedNodes].some(n=>n.nodeType===1&&(n.matches('select')||n.querySelector('select')))))schedule();});
+    for(const surface of [root,document.getElementById('walk_cards')])if(surface)observer.observe(surface,{childList:true,subtree:true,attributes:true,attributeFilter:['disabled']});
+    document.addEventListener('mercado-map-change',schedule);window.addEventListener('resize',()=>{if(menu.matches(':popover-open'))menu.hidePopover();});document.getElementById('walk_cards')?.addEventListener('scroll',()=>{if(menu.matches(':popover-open'))menu.hidePopover();},{capture:true});root.addEventListener('scroll',()=>{if(menu.matches(':popover-open'))positionMenu();},{passive:true});refresh();
 })();
