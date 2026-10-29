@@ -122,6 +122,7 @@ async function confirmCart() {
                 payload.market=(branch.name+' · '+(branch.address || 'Local sin confirmar')).slice(0,255);
                 const quantity=scaledDecimal(payload.quantity,6,true);scaledDecimal(payload.total_paid,4);
                 if(payload.add_to_stock) {
+                    if(product.stock_pattern==='irregular') payload.location='Sin ubicación';
                     if(product.unit_status!=='confirmed') throw new Error('Confirmá la unidad de '+product.product_all);
                     if(product.revision!==payload.product_revision) throw new Error('Cambió la presentación de '+product.product_all+'. Quitalo y volvé a agregarlo');
                     const multiplier=product.sale_mode==='package' ? scaledDecimal(product.package_content,6,true) : product.sale_mode==='fractional' ? 1000000000n : 1000000n;

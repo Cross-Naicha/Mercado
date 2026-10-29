@@ -1,7 +1,7 @@
 """Operaciones transaccionales e idempotentes para clientes sin conexión."""
 import hashlib
 import json
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Literal
 from uuid import UUID
@@ -21,6 +21,7 @@ class StorageLocation(BaseModel):
     role: Literal['daily','reserve'] = 'daily'
 
 class ProductData(BaseModel):
+    stock_pattern: Literal['stable','irregular'] = 'stable'
     flavor: str = Field(default="",max_length=255)
     storage_location: str = Field(default="",max_length=255)
     storage_detail: str = Field(default="",max_length=255)
@@ -41,6 +42,7 @@ class ProductData(BaseModel):
 
 
 class ProductEdit(BaseModel):
+    stock_pattern: Literal['stable','irregular'] | None = None
     flavor: str = Field(default="",max_length=255)
     storage_location: str = Field(default="",max_length=255)
     storage_detail: str = Field(default="",max_length=255)
@@ -178,7 +180,10 @@ def apply_operation(operation: Operation):
             cursor.execute('UPDATE catalog_products SET display_label=%s WHERE id=%s',((payload.display_label or '').strip() or None,entity))
             cursor.execute('UPDATE catalog_products SET category=%s,unit_content=%s,unit_content_unit=%s WHERE id=%s',(payload.category,payload.unit_content,payload.unit_content_unit,entity))
             cursor.execute('UPDATE catalog_products SET flavor=%s WHERE id=%s',(payload.flavor.strip(),entity))
+            cursor.execute('UPDATE catalog_products SET stock_pattern=%s WHERE id=%s',(payload.stock_pattern,entity))
             cursor.execute('UPDATE catalog_products SET storage_location=%s,storage_detail=%s WHERE id=%s',(payload.storage_location.strip(),payload.storage_detail.strip(),entity))
+            if payload.stock_pattern=='irregular':
+                cursor.execute("UPDATE catalog_products SET storage_location='',storage_detail='',storage_locations=JSON_ARRAY() WHERE id=%s",(entity,))
             if payload.sale_mode:
                 settings=ProductSettings(product_id=entity,expected_revision=1,sale_mode=payload.sale_mode,content_unit=payload.content_unit,package_content=payload.package_content)
                 validate_settings(settings)
@@ -228,6 +233,10 @@ def apply_operation(operation: Operation):
                 cursor.execute('UPDATE catalog_products SET storage_location=%s WHERE id=%s',(payload.storage_location.strip(),str(payload.product_id)))
             if 'unit_content' in operation.payload:
                 cursor.execute('UPDATE catalog_products SET unit_content=%s,unit_content_unit=%s WHERE id=%s',(payload.unit_content,payload.unit_content_unit,str(payload.product_id)))
+            if payload.stock_pattern is not None:
+                cursor.execute('UPDATE catalog_products SET stock_pattern=%s WHERE id=%s',(payload.stock_pattern,str(payload.product_id)))
+            if (payload.stock_pattern or product.get('stock_pattern','stable'))=='irregular':
+                cursor.execute("UPDATE catalog_products SET storage_location='',storage_detail='',storage_locations=JSON_ARRAY() WHERE id=%s",(str(payload.product_id),))
         elif operation.kind=='shelf_price':
             product=get_product(cursor,payload.product_id)
             expected='package' if not product['sale_mode'] or product['sale_mode']=='package' else 'unit' if product['sale_mode']=='unit' else 'kg' if product['content_unit']=='g' else 'l'
@@ -338,7 +347,7 @@ def get_catalog():
         connection.commit()
         cursor.execute('''SELECT c.id, p.id_product AS legacy_id, p.product AS product_name,
             p.brand AS product_brand,p.ptype AS product_ptype,p.psubtype AS product_psubtype,
-            c.sale_mode,c.content_unit,c.package_content,c.unit_status,c.revision,c.display_label,c.created_at,c.unit_content,c.unit_content_unit,c.storage_location,c.storage_detail,c.storage_locations,c.flavor,
+            c.sale_mode,c.content_unit,c.package_content,c.unit_status,c.revision,c.display_label,c.created_at,c.unit_content,c.unit_content_unit,c.storage_location,c.storage_detail,c.storage_locations,c.flavor,c.stock_pattern,
             p.pclass AS product_class,CAST(p.presentation AS DECIMAL(18,6)) AS presentation,
             CAST(COALESCE((SELECT l.legacy_unit_price FROM purchases b JOIN purchase_lines l
                 ON l.purchase_id=b.id WHERE b.legacy_instance_id=i.id_instance LIMIT 1),i.price)
@@ -361,7 +370,52 @@ def get_catalog():
         cursor.execute('SELECT o.*,s.name AS market FROM price_observations o LEFT JOIN store_branches s ON s.id=o.branch_id ORDER BY o.occurred_at DESC,o.received_at DESC,o.id DESC')
         observations={}
         for observation in cursor.fetchall(): observations.setdefault(observation['product_id'],[]).append(observation)
+        history={}
+        # Último precio de cada local, independiente del historial limitado a 90 días.
+        cursor.execute('''SELECT l.product_id,b.id,b.branch_id,b.occurred_at,b.occurred_on,b.event_timezone,
+            s.name AS market,l.quantity,l.quantity_basis,l.total_paid,l.is_promotion,l.promotion_description
+            FROM purchases b JOIN purchase_lines l ON l.purchase_id=b.id
+            LEFT JOIN store_branches s ON s.id=b.branch_id''')
+        latest_by_store={}
+        def keep_price(product_id,option):
+            local=option['branch_id'] or option['market'] or 'unknown'
+            bucket=latest_by_store.setdefault(product_id,{})
+            previous=bucket.get(local)
+            if previous is None or (option['occurred_at'],option['received_at'],option['id'])>(previous['occurred_at'],previous['received_at'],previous['id']):bucket[local]=option
+        for entry in cursor.fetchall():
+            when=entry['occurred_at'] or datetime.combine(entry['occurred_on'],datetime.min.time()).replace(hour=12)
+            zone=entry['event_timezone'] or 'America/Argentina/Buenos_Aires'
+            multiplier=1000 if entry['quantity_basis'] in ('g','ml') else 1
+            price=(entry['total_paid']*multiplier/entry['quantity']).quantize(Decimal('0.0001'),rounding=ROUND_HALF_UP)
+            keep_price(entry['product_id'],{'id':entry['id'],'branch_id':entry['branch_id'],'price':str(price),'market':entry['market'] or '',
+                'occurred_at':when.isoformat()+'Z','received_at':when.isoformat()+'Z','date':when.replace(tzinfo=timezone.utc).astimezone(ZoneInfo(zone)).date().isoformat(),
+                'source':'purchase','promotion':bool(entry['is_promotion']),'conditions':None,'description':entry['promotion_description']})
+        # Mantener la serie histórica acotada a 90 días.
+        cursor.execute("""SELECT l.id,b.id AS purchase_id,l.product_id,COALESCE(b.occurred_at,TIMESTAMP(b.occurred_on,'12:00:00')) AS occurred_at,b.event_timezone,s.name AS market,
+            l.quantity,l.quantity_basis,l.total_paid,l.legacy_unit_price FROM purchases b JOIN purchase_lines l ON l.purchase_id=b.id
+            LEFT JOIN store_branches s ON s.id=b.branch_id
+            WHERE COALESCE(b.occurred_at,TIMESTAMP(b.occurred_on,'12:00:00')) BETWEEN UTC_TIMESTAMP() - INTERVAL 90 DAY AND UTC_TIMESTAMP() ORDER BY b.occurred_at,l.id""")
+        for entry in cursor.fetchall():
+            multiplier=1000 if entry['quantity_basis'] in ('g','ml') else 1
+            price=(entry['total_paid']*multiplier/entry['quantity']).quantize(Decimal('0.0001'),rounding=ROUND_HALF_UP)
+            history.setdefault(entry['product_id'],[]).append({'id':entry['purchase_id'],'occurred_at':entry['occurred_at'].isoformat()+'Z','event_timezone':entry['event_timezone'],'price':str(price),'market':entry['market'] or ''})
+        cutoff=datetime.now(timezone.utc)-timedelta(days=90)
+        now=datetime.now(timezone.utc)
+        for product_id,entries in observations.items():
+            for entry in entries:
+                when=entry['occurred_at'].replace(tzinfo=timezone.utc)
+                multiplier=1000 if entry['quantity_basis'] in ('g','ml') else 1
+                price=(entry['total_price']*multiplier/entry['quantity']).quantize(Decimal('0.0001'),rounding=ROUND_HALF_UP)
+                if entry['quantity_basis'] in ('g','ml') and entry['list_price'] is not None:price=entry['list_price']
+                keep_price(product_id,{'id':entry['id'],'branch_id':entry['branch_id'],'price':str(price),'market':entry['market'] or '',
+                    'occurred_at':when.isoformat().replace('+00:00','Z'),'received_at':entry['received_at'].isoformat()+'Z',
+                    'date':when.astimezone(ZoneInfo(entry['event_timezone'])).date().isoformat(),'source':'shelf','promotion':entry['promotion_code']!='none',
+                    'conditions':entry['promotion_code'],'description':entry['promotion_description']})
+                if not cutoff<=when<=now: continue
+                history.setdefault(product_id,[]).append({'id':entry['id'],'occurred_at':when.isoformat(),'event_timezone':entry['event_timezone'],'price':str(price),'market':entry['market'] or ''})
         for p in rows:
+            p['price_options']=list(latest_by_store.get(p['id'],{}).values())
+            p['price_history']=history.get(p['id'],[])
             p['last_price']=str(p['last_price']) if p['last_price'] is not None else None
             p['last_price_date']=p['last_price_date'].isoformat() if p['last_price_date'] else None
             p['normal_date'] = p['normal_date'].isoformat() if p['normal_date'] else None

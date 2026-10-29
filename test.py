@@ -71,7 +71,13 @@ def read_product_endpoint():
 @app.get('/api/catalog')
 def catalog_endpoint():
     try:
-        return get_catalog()
+        rows=get_catalog()
+        from availability_api import snapshot as availability_snapshot
+        by_product={}
+        for record in availability_snapshot()['records']:
+            by_product.setdefault(record['product_id'],{})[record['branch_id']]={key:record[key] for key in ('status','confirmed_at','revision')}
+        for row in rows: row['availability_by_branch']=by_product.get(str(row['id']),{})
+        return rows
     except mysql.connector.Error:
         raise HTTPException(503, 'Base de datos no disponible')
 
@@ -98,3 +104,8 @@ def backup_endpoint():
 def shopping_endpoint():
     try: return shopping_snapshot()
     except mysql.connector.Error: raise HTTPException(503,'Información de compras no disponible')
+from maps_api import router as maps_router
+app.include_router(maps_router)
+
+from availability_api import router as availability_router
+app.include_router(availability_router)

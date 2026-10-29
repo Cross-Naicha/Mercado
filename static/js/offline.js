@@ -67,6 +67,8 @@ open_database = function () {
 };
 async function updateStatus(message) {
     const queue = await localRead('outbox');
+    const lastSync=(await localRead('shopping_cache')).find(row=>row.id==='last_sync');
+    $('last_sync_status').textContent='Última sincronización: '+(lastSync ? new Date(lastSync.synced_at).toLocaleString('es-AR',{dateStyle:'short',timeStyle:'short',hourCycle:'h23'}) : 'todavía no registrada.');
     const syncMenu=$('sync_menu_button');
     if(syncMenu) {syncMenu.parentElement.hidden=queue.length===0;syncMenu.textContent='Sincronización · '+queue.length+' pendiente'+(queue.length===1 ? '' : 's');}
     $('sync_status').textContent = `${queue.length} pendientes${syncing ? ' · Sincronizando…' : ''}${message ? ' · ' + message : ''}`;
@@ -74,14 +76,30 @@ async function updateStatus(message) {
         const review=document.createElement('button');review.type='button';review.textContent='Ver errores';
         review.onclick=()=>{showModule('settings');$('pending_details').open=true;};$('sync_status').append(' ',review);
     }
+    const attention=queue.filter(op=>op.error_status&&op.error_status<500).length;
+    $('pending_count').textContent=String(queue.length);$('pending_count').classList.toggle('needs-attention',attention>0);
+    $('pending_caption').textContent=!queue.length?'Todo al día':attention?attention+' '+(attention===1?'registro necesita':'registros necesitan')+' revisión':queue.length+' '+(queue.length===1?'cambio por sincronizar':'cambios por sincronizar');
+    const catalog=await localRead('catalog');
+    const expanded=new Set([...$('pending_list').querySelectorAll('li[data-operation-id]')].filter(item=>item.querySelector('details')?.open).map(item=>item.dataset.operationId));
     $('pending_list').replaceChildren();
+    if(!queue.length){const empty=document.createElement('li');empty.className='pending-empty';const icon=document.createElement('span');icon.className='pending-empty-icon';icon.textContent='✓';icon.setAttribute('aria-hidden','true');const title=document.createElement('strong');title.textContent='Todo al día';const text=document.createElement('p');text.textContent='No hay registros esperando sincronización.';empty.append(icon,title,text);$('pending_list').append(empty);}
     for (const op of queue) {
         const item = document.createElement('li');
         const names={product:'Producto',product_edit:'Edición de producto',product_delete:'Borrado de producto',shelf_price:'Precio de góndola',purchase:'Compra',occasional_purchase:'Compra ocasional',settings:'Unidad del producto',stock_count:'Recuento de inventario',stock_transfer:'Traslado de existencias',stock_initial:'Stock inicial',stock_move:'Movimiento de stock',minimum:'Mínimo de compra',barcode:'Código de barras',branch:'Sucursal',shopping_document:'Información del súper'};
-        item.textContent = `${names[op.kind]}: ${op.payload.product || op.payload.market || op.payload.note || ''} · ${op.error || 'Guardado en este teléfono'}`;
-        const details=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Ver datos y corregir';details.append(summary);
+        item.className='pending-card';item.dataset.operationId=op.operation_id;
+        const needsReview=Boolean(op.error_status&&op.error_status<500),waiting=Boolean(op.error&&!needsReview);
+        item.dataset.state=needsReview?'attention':waiting?'waiting':'ready';
+        const header=document.createElement('div');header.className='pending-card-header';
+        const kind=document.createElement('span');kind.className='pending-kind';kind.textContent=names[op.kind]||'Cambio pendiente';
+        const badge=document.createElement('span');badge.className='pending-badge';badge.textContent=needsReview?'Revisar':waiting?'Sin conexión':'Por sincronizar';header.append(kind,badge);
+        const title=document.createElement('strong');title.className='pending-card-title';const product=catalog.find(row=>row.id===op.payload.product_id||row.id===op.entity_id);
+        title.textContent=op.payload.product||(product?productLabel(product):'')||op.payload.market||op.payload.name||op.payload.note||names[op.kind]||'Cambio guardado';
+        const state=document.createElement('p');state.className='pending-card-state';state.textContent=op.error||'Guardado en este dispositivo. Listo para sincronizar.';
+        item.append(header,title,state);
+        const date=new Date(op.created_at);if(Number.isFinite(date.getTime())){const time=document.createElement('time');time.className='pending-card-date';time.dateTime=op.created_at;time.textContent=date.toLocaleString('es-AR',{dateStyle:'short',timeStyle:'short',hourCycle:'h23'});item.append(time);}
+        const details=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Ver detalle y opciones';details.className='pending-card-details';details.open=expanded.has(op.operation_id);details.append(summary);
         const labels={product:'Producto',brand:'Marca',ptype:'Tipo',psubtype:'Subtipo',display_label:'Etiqueta',presentation:'Presentación interna',quantity:'Cantidad',price:'Precio',total_paid:'Importe total',market:'Comercio',is_promotion:'Es promoción',promotion_description:'Descripción de promoción',sale_mode:'Modalidad',content_unit:'Unidad',package_content:'Contenido',promotion:'Promoción',special_quantity:'Cantidad de la oferta',special_total:'Importe de la oferta',note:'Nota',location:'Ubicación',expires_on:'Vencimiento'};
-        const form=document.createElement('form'),inputs={};
+        const form=document.createElement('form'),inputs={};form.className='pending-correction-form';
         for(const [key,value] of Object.entries(op.payload)) {
             if(key==='display_label') continue;
             if(!labels[key]) continue;
@@ -92,17 +110,17 @@ async function updateStatus(message) {
             else input.type=typeof value==='boolean' ? 'checkbox' : 'text';
             if(input.type==='checkbox') input.checked=value;else input.value=value ?? '';
             input.disabled=!op.error_status || op.error_status>=500 || (op.kind==='purchase' && key==='price');
-            label.append(input);form.append(label,document.createElement('br'));inputs[key]=input;
+            label.append(input);form.append(label);inputs[key]=input;
         }
         const save=document.createElement('button');save.type='submit';save.textContent='Guardar corrección y reintentar';save.disabled=!op.error_status || op.error_status>=500;
-        form.append(save);form.onsubmit=async event=>{event.preventDefault();await correctPending(op.operation_id,inputs);};details.append(form);
+        save.className='pending-save';form.append(save);form.onsubmit=async event=>{event.preventDefault();await correctPending(op.operation_id,inputs);};details.append(form);
         if(op.payload.product_id) {
             const edit=document.createElement('button');edit.type='button';edit.textContent='Revisar unidad y datos del producto';
             edit.onclick=async()=>{showModule('products');await editProduct(op.payload.product_id);};details.append(edit);
         }
         const retry=document.createElement('button');retry.type='button';retry.textContent='Reintentar sincronización';retry.onclick=()=>{retry.blur();void sync_pending();};details.append(retry);
         if(['product_edit','settings'].includes(op.kind)) {
-            const discard=document.createElement('button');discard.type='button';discard.textContent='Descartar edición pendiente';
+            const discard=document.createElement('button');discard.type='button';discard.textContent='Descartar edición pendiente';discard.className='pending-discard';
             discard.onclick=async()=>{discard.blur();await discardPendingEdit(op.operation_id);};details.append(discard);
         }
         item.append(details);
@@ -197,10 +215,18 @@ async function refreshCatalog() {
         };
     });
 }
+async function sync_all() {
+    const button=$('sync_all_now');if(button.disabled)return;
+    button.disabled=true;button.textContent='Sincronizando…';
+    try {
+        await sync_pending();
+        await Promise.allSettled([window.MercadoAvailability?.sync(),window.MercadoMapSync?.sync()]);
+    } finally {button.disabled=false;button.textContent='Sincronizar ahora';}
+}
 async function sync_pending() {
     if (!db || syncing || $('pending_list').contains(document.activeElement)) return;
     syncing = true;
-    let outcome = 'Servidor disponible';
+    let outcome = 'Servidor disponible',complete=true;
     try {
         const queue = await localRead('outbox');
         const priority=kind => kind==='product' ? 0 : 1;
@@ -214,6 +240,7 @@ async function sync_pending() {
                 if (receipt.operation_id !== op.operation_id || receipt.entity_id !== op.entity_id || receipt.status !== 'confirmed') throw new Error('Confirmación inválida');
                 await localTransaction(['outbox'], tx => tx.objectStore('outbox').delete(op.operation_id));
             } catch (error) {
+                complete=false;
                 op.attempts = (op.attempts || 0) + 1;
                 op.error = error.status && error.status < 500 ? error.message : 'Esperando conexión con tu PC';
                 op.error_status=error.status || null;
@@ -222,9 +249,12 @@ async function sync_pending() {
                 outcome = 'Hay registros que requieren revisión; siguen guardados';
             }
         }
-        try { await refreshCatalog(); } catch (_) { outcome = 'Usando catálogo guardado en el teléfono'; }
-        try { await refreshStock(); } catch (_) { /* Se conserva la copia local y sus movimientos. */ }
-        try { await refreshShopping(); } catch (_) { /* Mapa y códigos siguen disponibles localmente. */ }
+        try { await refreshCatalog(); } catch (_) { complete=false;outcome = 'Usando catálogo guardado en el teléfono'; }
+        try { await refreshStock(); } catch (_) { complete=false; /* Se conserva la copia local y sus movimientos. */ }
+        try { await refreshShopping(); } catch (_) { complete=false; /* Mapa y códigos siguen disponibles localmente. */ }
+        if(complete && !(await localRead('outbox')).length) {
+            await localTransaction(['shopping_cache'],tx=>tx.objectStore('shopping_cache').put({id:'last_sync',synced_at:new Date().toISOString()}));
+        }
         await read_products();
         await renderStock();
         await renderShopping();
@@ -233,6 +263,38 @@ async function sync_pending() {
 }
 let actionProductId=null,shelfProductId=null,shelfEditingObservation=null,catalogRenderGeneration=0,revealedProductId=null,productFilterSnapshot=null;
 let priceComparisonProduct=null;
+let pricesMode=false;
+let historyMode=false;
+try {historyMode=localStorage.getItem('mercado-history-mode')==='true';pricesMode=!historyMode && localStorage.getItem('mercado-prices-mode')==='true';} catch (_) {}
+function updatePricesModeControls() {
+    document.documentElement.classList.toggle('prices-mode',pricesMode);
+    document.documentElement.classList.toggle('history-mode',historyMode);
+    $('history_mode_toggle').setAttribute('aria-pressed',String(historyMode));
+    const toggle=$('prices_mode_toggle');
+    toggle.setAttribute('aria-pressed',String(pricesMode));toggle.title=pricesMode ? 'Desactivar modo Precios' : 'Activar modo Precios';
+    $('products_floating_toggle').classList.toggle('prices-mode-active',pricesMode);
+    document.dispatchEvent(new Event('mercado-catalog-mode-change'));
+}
+updatePricesModeControls();
+async function setPricesMode(enabled) {
+    pricesMode=enabled;if(enabled) {historyMode=false;try {localStorage.setItem('mercado-history-mode','false');} catch (_) {}}priceComparisonProduct=null;
+    try {localStorage.setItem('mercado-prices-mode',String(enabled));} catch (_) {}
+    updatePricesModeControls();
+    if(actionProductId) await closeProductActions(false);
+    await read_products();
+}
+function updateStockPatternFields() {
+    const irregular=$('edit_stock_pattern').value==='irregular';
+    for(const id of ['edit_storage_location','edit_storage_detail']) {const input=$(id);const row=input.closest('.editor-field-row') || input.closest('label');row.hidden=irregular;input.disabled=irregular;}
+}
+async function setHistoryMode(enabled) {
+    historyMode=enabled;
+    if(enabled) {pricesMode=false;priceComparisonProduct=null;}
+    try {localStorage.setItem('mercado-history-mode',String(historyMode));localStorage.setItem('mercado-prices-mode',String(pricesMode));} catch (_) {}
+    updatePricesModeControls();
+    if(actionProductId) await closeProductActions(false);
+    await read_products();
+}
 async function catalogWithPrices() {
     const rows=await localRead('catalog');
     const pending=(await localRead('outbox')).filter(op=>['purchase','shelf_price'].includes(op.kind)).sort((a,b)=>(a.sequence || 0)-(b.sequence || 0));
@@ -248,9 +310,21 @@ async function catalogWithPrices() {
 
             if(p.promotion==='none' && (!row.normal_date || day>=row.normal_date)) Object.assign(row,{normal_price:p.price,normal_date:day,normal_unit:row.presentation ? String(Number(p.price)/Number(row.presentation)) : null});
         }
+        row.price_history=(row.price_history || []).filter(entry=>entry.id!==(p.observation_id || op.entity_id));
+        row.price_history.push({id:p.observation_id || op.entity_id,occurred_at:p.occurred_at,event_timezone:p.event_timezone,price:value,market:p.market || ''});
+        row.price_options ||= [];
+        const option={id:p.observation_id || op.entity_id,branch_id:p.branch_id || null,price:value,market:p.market || '',date:day,occurred_at:p.occurred_at,received_at:op.created_at,source:shelf?'shelf':'purchase',promotion:shelf?p.promotion!=='none':p.is_promotion,conditions:shelf?p.promotion:null,description:p.promotion_description || '',pending:true};
+        const local=entry=>entry.branch_id || entry.market || 'unknown';
+        const previous=row.price_options.find(entry=>local(entry)===local(option));
+        if(!previous || previous.id===option.id || Date.parse(option.occurred_at)>=Date.parse(previous.occurred_at))row.price_options=[...row.price_options.filter(entry=>local(entry)!==local(option)),option];
         if(row.last_price_at ? Date.parse(p.occurred_at)>=Date.parse(row.last_price_at) : !row.last_price_date || day>=row.last_price_date) Object.assign(row,{last_price:value,last_price_date:day,last_price_at:p.occurred_at,last_price_promotion:shelf ? p.promotion!=='none' : p.is_promotion,last_price_pending:true,last_price_source:shelf ? 'shelf' : 'purchase',last_price_conditions:shelf ? p.promotion : null,last_list_price:shelf ? p.price : null,last_price_market:p.market,last_price_description:p.promotion_description || null,last_offer_quantity:p.special_quantity ? String(p.special_quantity) : null,last_offer_total:p.special_total || null});
     }
+    for(const row of rows)row.best_price=bestKnownProductPrice(row);
     return rows;
+}
+function bestKnownProductPrice(row) {
+    const options=(row.price_options || []).filter(option=>option.price!=null && Number.isFinite(Number(option.price)) && Number(option.price)>=0);
+    return options.reduce((best,option)=>!best || scaledDecimal(option.price,4)<scaledDecimal(best.price,4) || (scaledDecimal(option.price,4)===scaledDecimal(best.price,4) && Date.parse(option.occurred_at)>Date.parse(best.occurred_at)) ? option : best,null);
 }
 function shelfPromotion(code) {return {'none':[1n,1n,1n],'offer':[1n,1n,1n],'2x1':[2n,1n,1n],'3x2':[3n,2n,1n],'4x3':[4n,3n,1n],'2_50%':[2n,3n,2n],'2_80%':[2n,6n,5n]}[code || 'none'];}
 function revealProductControls(element) {
@@ -353,6 +427,7 @@ async function saveShelfPrice() {
         if(payload.price!==null) scaledDecimal(payload.price,4,true);
         if(comparisonProductDraft?.row.id===row.id) {
             const commit=async()=>{
+                await assertNewProductUnique(comparisonProductDraft.payload);
                 const previous=await localRead('outbox');
                 const sequence=Math.max(Date.now(),...previous.map(op=>(op.sequence || 0)+1));
                 const productOp={operation_id:identifier(),entity_id:row.id,kind:'product',payload:comparisonProductDraft.payload,created_at:new Date().toISOString(),sequence,attempts:0,depends_on:[]};
@@ -369,7 +444,7 @@ async function saveShelfPrice() {
     finally {saving=false;}
 }
 function comparableProductPrice(row) {
-    const value=row.last_price ?? row.normal_price;
+    const value=row.best_price?.price ?? row.last_price ?? row.normal_price;
     if(value==null || row.unit_status!=='confirmed') return null;
     const weightedPack=row.sale_mode==='package' && row.content_unit==='unit' && Number(row.package_content)>1 && Number(row.unit_content)>0 && ['g','ml'].includes(row.unit_content_unit);
     const measure=weightedPack ? row.unit_content_unit : row.content_unit;
@@ -411,7 +486,7 @@ function highlightProductFlavors(rows,selectedId) {
         const price=card.querySelector('.product-last-price');
         if(price?.normalPriceNodes) price.replaceChildren(...price.normalPriceNodes);
         if(price && comparing && (comparison || row.id===selected.id) && row.sale_mode==='package' && row.content_unit==='unit' && Number(row.package_content)>1) {
-            const value=row.last_price ?? row.normal_price;
+            const value=row.best_price?.price ?? row.last_price ?? row.normal_price;
             if(value!=null) {
                 if(!price.normalPriceNodes) price.normalPriceNodes=[...price.childNodes];
                 const individual=document.createElement('span');individual.textContent=formatCents(roundedDivide(scaledDecimal(value,4)*1000000n,scaledDecimal(row.package_content,6,true)*100n))+' por paquete individual';
@@ -522,10 +597,11 @@ read_products = async function () {
         const tr = document.createElement('tr'), td = document.createElement('td'), title = document.createElement('strong'), button = document.createElement('button');
         const menuOpen=row.id===actionProductId;
         title.textContent = row.product_all;
-        button.textContent='Seleccionar';button.onclick = () => showProductActions(row.id);
-        const edit=document.createElement('button');edit.type='button';edit.textContent='Editar';edit.onclick=()=>editProduct(row.id);
+        button.textContent='Opciones';button.onclick = () => showProductActions(row.id);
+        const edit=document.createElement('button');edit.type='button';edit.className='product-cart-button';edit.title='Agregar al carrito';edit.setAttribute('aria-label','Agregar al carrito');edit.innerHTML='<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3h2l2.5 12h11l2-8H6"/><circle cx="9" cy="20" r="1"/><circle cx="18" cy="20" r="1"/></svg>';edit.onclick=()=>useProduct('purchase',row.id);
         const price=document.createElement('div');price.className='product-last-price';
-        const value=row.last_price ?? row.normal_price;
+        const best=row.best_price;
+        const value=best?.price ?? row.last_price ?? row.normal_price;
         price.textContent=value==null ? 'Sin precio registrado' : formatProductPrice(value);
         if(value!=null && row.sale_mode==='fractional') price.textContent+='/'+(row.content_unit==='g' ? 'kg' : 'litro');
         const unitPrice=value==null || row.sale_mode==='fractional' ? '' : productUnitPrice(row,value);
@@ -539,23 +615,45 @@ read_products = async function () {
             price.append(normalized);
         }
         const caption=document.createElement('div');caption.className='product-price-caption';
-        const date=row.last_price_date || row.normal_date;
-        caption.textContent='Último precio'+(date ? ' · '+date+' ('+priceAgeDays(date)+' días)' : '');
-        if(row.last_price_source==='shelf') caption.textContent+=' · Góndola'+(row.last_price_market ? ' · '+row.last_price_market : '')+(row.last_price_conditions && row.last_price_conditions!=='none' ? ' · '+row.last_price_conditions.replace('offer','Oferta').replace('2_50%','Segunda al 50%').replace('2_80%','Segunda al 80%') : '');
-        if(row.last_price_description && (row.last_price_source!=='shelf' || row.last_price_conditions==='special')) caption.textContent+=' · '+row.last_price_description;
-        if(row.last_price_pending) caption.textContent+=' · Pendiente de sincronizar';
+        const date=best?.date || row.last_price_date || row.normal_date;
+        if(value!=null && date) {
+            const age=Math.max(0,priceAgeDays(date));
+            if(Number.isFinite(age)) {
+                price.dataset.freshness=age<=7?'fresh':age<=14?'recent':'old';
+                price.title='Precio registrado hace '+age+' día'+(age===1?'':'s');
+                price.setAttribute('aria-label',formatProductPrice(value)+'. '+price.title);
+            }
+        }
+        caption.textContent='';
+        const market=best ? best.market : row.last_price_market,conditions=best ? best.conditions : row.last_price_conditions;
+        if(market)caption.textContent=market;
+        if(date){const days=Math.max(0,priceAgeDays(date));caption.textContent+=(caption.textContent?' · ':'')+days+(days===1?' día':' días');}
+        if(conditions && conditions!=='none')caption.textContent+=' · '+conditions.replace('offer','Oferta').replace('2_50%','Segunda al 50%').replace('2_80%','Segunda al 80%').replace('special','Promoción especial');
+        const description=best ? best.description : row.last_price_description;
+        if(description)caption.textContent+=' · '+description;
+        else if(best?.promotion && !conditions)caption.textContent+=' · Promoción';
+        if(best ? best.pending : row.last_price_pending) caption.textContent+=' · Pendiente de sincronizar';
         if(value==null) caption.textContent='';
         const actions=document.createElement('div');actions.className='product-row-actions';actions.append(button);
         if(!menuOpen) actions.append(edit);
-        if(!menuOpen && !focusedProduct && rows.some(candidate=>productPriceComparison(candidate,row)
+        if(pricesMode && !menuOpen) {
+            button.textContent='Distinto precio';button.onclick=()=>openShelfPrice(row);
+            edit.textContent='Mismo precio';edit.onclick=()=>recordSameShelfPrice(row.id);
+            edit.className='';edit.title='Registrar mismo precio';edit.setAttribute('aria-label','Mismo precio');
+            edit.disabled=(row.last_price ?? row.normal_price)==null;
+            const exit=document.createElement('button');exit.type='button';exit.className='prices-mode-exit';exit.textContent='$';exit.setAttribute('aria-label','Desactivar modo Precios');exit.title='Desactivar modo Precios';exit.onclick=()=>setPricesMode(false);actions.append(exit);
+        }
+
+        if(!historyMode && !pricesMode && !menuOpen && !focusedProduct && rows.some(candidate=>productPriceComparison(candidate,row)
             && (selected_class_filter===null || candidate.product_class===selected_class_filter)
             && (selected_product_filter===null || candidate.product_name===selected_product_filter)
             && (selected_brand_filter===null || candidate.product_brand===selected_brand_filter)
             && [candidate.product_all,candidate.product_name,candidate.product_brand,candidate.product_ptype,candidate.product_psubtype,candidate.product_class].filter(Boolean).join(' ').toLowerCase().includes(search))) {
-            const compare=document.createElement('button');compare.type='button';compare.textContent='{}';compare.setAttribute('aria-label','Comparar precios de productos relacionados');compare.setAttribute('aria-pressed',String(priceComparisonProduct===row.id));
+            const compare=document.createElement('button');compare.type='button';compare.className='product-compare-related';compare.textContent='{}';compare.setAttribute('aria-label','Comparar precios de productos relacionados');compare.setAttribute('aria-pressed',String(priceComparisonProduct===row.id));
             compare.onclick=()=>{priceComparisonProduct=priceComparisonProduct===row.id ? null : row.id;compare.setAttribute('aria-pressed',String(priceComparisonProduct===row.id));highlightProductFlavors(rows,row.id);centerProductCard(td);};actions.append(compare);
         }
         td.className='product-card';td.dataset.productId=row.id;
+        if(historyMode) actions.classList.add('history-hidden-actions');
         if(row.id===editingProduct) {td.classList.add('product-edit-open');actions.hidden=true;}
         if(menuOpen) {td.classList.add('product-menu-open');actions.hidden=true;price.hidden=true;caption.hidden=true;}
         const expanded=row.id===revealedProductId || row.id===focusedProduct;
@@ -572,9 +670,9 @@ read_products = async function () {
             highlightProductFlavors(rows,opening ? row.id : null);
             if(opening) centerProductCard(td);
         };
-        td.onclick=event=>{if(!event.target.closest('button,input,select,textarea,a,form')) toggleActions();};
+        td.onclick=event=>{if(!event.target.closest('button,input,select,textarea,a,form,.price-history')) toggleActions();};
         td.onkeydown=event=>{if(event.target===td && ['Enter',' '].includes(event.key)) {event.preventDefault();toggleActions();}};
-        td.append(title,price,caption,actions); tr.append(td); $('data_table').append(tr);
+        td.append(title,price,caption,actions);if(historyMode) td.append(renderPriceHistory(row)); tr.append(td); $('data_table').append(tr);
         if(row.id===actionProductId) td.append($('product_actions'));
         if(row.id===editingProduct) td.append($('product_editor'));
         if(row.id===shelfProductId) td.append($('shelf_price_form'));
@@ -697,11 +795,11 @@ async function closeProductActions(restore=true) {
         root.style.scrollBehavior=previousScrollBehavior;root.style.overflowAnchor=previousAnchor;
     }
 }
-async function recordSameShelfPrice() {
+async function recordSameShelfPrice(productId=null) {
     if(saving) return;
     saving=true;
     try {
-        const id=$('product_actions').dataset.productId;
+        const id=productId || $('product_actions').dataset.productId;
         const row=(await catalogWithPrices()).find(p=>p.id===id);
         const value=row?.last_price ?? row?.normal_price;
         if(value==null) throw new Error('Este producto todavía no tiene un precio registrado');
@@ -720,14 +818,14 @@ async function recordSameShelfPrice() {
         }
         Object.assign(payload,{branch_id:branch.id,market:(branch.name+' · '+(branch.address || 'Local sin confirmar')).slice(0,255)});
         await queueOperation('shelf_price',payload);
-        await closeProductActions();
+        if(productId) await read_products();else await closeProductActions();
         notice('Nueva observación guardada con el mismo precio y fecha de hoy: '+payload.market+'.');
         void sync_pending();
     } catch(error) {notice('No se guardó: '+error.message);}
     finally {saving=false;}
 }
-async function useProduct(action) {
-    const id=$('product_actions').dataset.productId,row=(await catalogWithPrices()).find(p=>p.id===id);if(!row) return;
+async function useProduct(action,productId=null) {
+    const id=productId || $('product_actions').dataset.productId,row=(await catalogWithPrices()).find(p=>p.id===id);if(!row) return;
     await closeProductActions(false);
     if(action==='edit') {await editProduct(id);return;}
     if(action==='shelf') {await openShelfPrice(row);return;}
@@ -873,6 +971,7 @@ function updateProductEditorFields() {
 }
 $('stock_sale_mode').addEventListener('change',updateProductEditorFields);
 async function editProduct(id) {
+    window.mapProductEditorReturn=null;const mapReturn=document.getElementById('map_product_editor_return');if(mapReturn)mapReturn.hidden=true;
     $('delete_product_confirmation').hidden=true;
     const row=(await localRead('catalog')).find(p=>p.id===id);if(!row) return;
     editingProduct=id;editingRevision=row.revision || 1;
@@ -891,7 +990,9 @@ async function editProduct(id) {
     const hasLots=(await projectedStock()).lots.some(l=>l.product_id===id);
     for(const field of ['stock_sale_mode','stock_content_unit','stock_package_content']) $(field).disabled=hasLots;
     for(const [field,value] of [['name',row.product_name],['brand',row.product_brand],['type',row.product_ptype],['subtype',row.product_psubtype],['category',row.product_class],['flavor',row.flavor],['storage_location',row.storage_location],['storage_detail',row.storage_detail]]) $('edit_'+field).value=value || '';
+    $('edit_stock_pattern').value=row.stock_pattern || 'stable';
     arrangeEditorFields();
+    updateStockPatternFields();
     updateProductEditorFields();
     $('product_editor').hidden=false;await read_products();showModule('products',{scroll:false});
     revealProductControls($('product_editor'));
@@ -913,30 +1014,58 @@ async function editShelfObservation() {
     } catch(error) {notice(error.message);}
 }
 function showDeleteProductConfirmation() {
+    $('delete_product_status').hidden=true;$('delete_product_status').textContent='';
+    $('delete_with_stock_confirmation').hidden=true;
     $('delete_product_confirmation').hidden=false;
     $('delete_product_confirmation').scrollIntoView({behavior:'smooth',block:'center'});
 }
-async function deleteEditedProduct() {
-    if(saving || !editingProduct) return;
+async function deleteEditedProduct(clearStock=false) {
+    const status=$('delete_product_status');
+    if(saving || !editingProduct) {status.hidden=false;status.textContent=saving?'Esperá a que termine el guardado actual y volvé a confirmar.':'Volvé a abrir la edición del producto.';return;}
+    const confirm=$('delete_product_confirmation').querySelector('button[onclick="deleteEditedProduct()"]');confirm.disabled=true;status.hidden=false;status.textContent='Borrando…';
+    const force=$('delete_with_stock_confirmation').querySelector('button');force.disabled=true;
     saving=true;
     try {
         const action=async()=>{
             const row=(await localRead('catalog')).find(p=>p.id===editingProduct);
             if(!row || (row.revision || 1)!==editingRevision) throw new Error('El producto cambió; volvé a abrir la edición');
             const stock=await projectedStock();
-            if(stock.lots.some(l=>l.product_id===row.id && balanceOf(stock,l.id)>0n)) throw new Error('El producto todavía tiene stock; resolvé sus existencias antes de borrarlo');
-            await queueOperationUnlocked('product_delete',{product_id:row.id,expected_revision:editingRevision},{...row,deleted_at:new Date().toISOString()});
+            const remaining=new Map();
+            for(const lot of stock.lots.filter(l=>l.product_id===row.id)) {const quantity=balanceOf(stock,lot.id);if(quantity>0n)remaining.set(lot.location,(remaining.get(lot.location)||0n)+quantity);}
+            if(remaining.size && !clearStock){$('delete_with_stock_confirmation').hidden=false;throw new Error('El producto todavía tiene stock: '+[...remaining].map(([location,quantity])=>stockCardQuantity(row,quantity)+' en '+location).join('; ')+'.');}
+            if(remaining.size)await queueZeroStockAndDelete(row,stock);
+            else await queueOperationUnlocked('product_delete',{product_id:row.id,expected_revision:editingRevision},{...row,deleted_at:new Date().toISOString()});
         };
         if(navigator.locks) await navigator.locks.request('mercado-local-save',action);else await action();
         await closeProductEditor();await renderStock();await renderShopping();
         notice('Producto borrado del catálogo. Su historial se conserva.');
         void sync_pending();
-    } catch(error) {notice('No se borró: '+error.message);}
-    finally {saving=false;}
+    } catch(error) {status.textContent='No se borró: '+error.message;notice(status.textContent);status.scrollIntoView({behavior:'smooth',block:'center'});}
+    finally {saving=false;confirm.disabled=false;force.disabled=false;}
+}
+async function queueZeroStockAndDelete(row,stock) {
+    const previous=await localRead('outbox'),totals=new Map();
+    for(const lot of stock.lots.filter(l=>l.product_id===row.id))totals.set(lot.location,(totals.get(lot.location)||0n)+balanceOf(stock,lot.id));
+    let sequence=Math.max(Date.now(),...previous.map(op=>(op.sequence||0)+1));
+    const dependencies=previous.filter(op=>op.payload.product_id===row.id || op.payload.data?.product_id===row.id || (op.kind==='product'&&op.entity_id===row.id) || ['stock_initial','stock_move','stock_count','stock_transfer','purchase'].includes(op.kind)).map(op=>op.operation_id);
+    const operations=[];
+    for(const [location,balance] of totals) {
+        if(balance<=0n)continue;
+        const op={operation_id:identifier(),entity_id:identifier(),kind:'stock_count',payload:{product_id:row.id,location,quantity:'0.000000',expected_balance:decimalText(balance,6),expires_on:null,...eventFields()},created_at:new Date().toISOString(),sequence:sequence++,attempts:0,depends_on:[...dependencies]};
+        operations.push({op,effect:await stockEffect(op)});
+    }
+    const deletion={operation_id:identifier(),entity_id:row.id,kind:'product_delete',payload:{product_id:row.id,expected_revision:row.revision||1},created_at:new Date().toISOString(),sequence:sequence++,attempts:0,depends_on:[...dependencies,...operations.map(({op})=>op.operation_id)]};
+    await localTransaction(['catalog','outbox','stock_effects'],tx=>{
+        for(const {op,effect} of operations){tx.objectStore('outbox').add(op);if(effect)tx.objectStore('stock_effects').put({id:op.operation_id,...effect});}
+        tx.objectStore('outbox').add(deletion);tx.objectStore('catalog').put({...row,deleted_at:new Date().toISOString()});
+    });
+    await updateStatus();
 }
 async function closeProductEditor(restore=true) {
     const id=editingProduct;
     editingProduct=null;editingRevision=null;$('product_editor').hidden=true;
+    const mapReturn=window.mapProductEditorReturn;window.mapProductEditorReturn=null;const returnButton=document.getElementById('map_product_editor_return');if(returnButton)returnButton.hidden=true;
+    if(restore&&mapReturn){await mapReturn();return;}
     if(restore) {
         revealedProductId=null;$('search').value='';resetCatalogFilters();productFilterSnapshot=null;
         actionProductId=id;
@@ -950,12 +1079,14 @@ async function saveProductEdit() {
             const row=(await localRead('catalog')).find(p=>p.id===editingProduct);
             if(!row || (row.revision || 1)!==editingRevision) throw new Error('El producto cambió: cancelá y volvé a abrir la edición');
             const payload={product_id:row.id,expected_revision:editingRevision,display_label:null,product:$('edit_name').value.trim(),brand:$('edit_brand').value.trim(),ptype:$('edit_type').value.trim() || null,psubtype:$('edit_subtype').value.trim() || null,category:$('edit_category').value.trim() || null,flavor:$('edit_flavor').value.trim(),storage_detail:$('edit_storage_detail').value.trim(),storage_location:$('edit_storage_location').value.trim()};
+            payload.stock_pattern=$('edit_stock_pattern').value;
+            if(payload.stock_pattern==='irregular') Object.assign(payload,{storage_location:'',storage_detail:'',storage_locations:[]});
             if(!payload.product) throw new Error('Ingresá el nombre del producto');
             if(Object.values(payload).some(v=>typeof v==='string' && v.length>255)) throw new Error('Los textos admiten hasta 255 caracteres');
             if($('stock_sale_mode').value) Object.assign(payload,productSpecification('stock_'));
             const lots=(await projectedStock()).lots;
             if(payload.sale_mode && lots.some(l=>l.product_id===row.id) && (row.sale_mode!==payload.sale_mode || row.content_unit!==payload.content_unit || scaledDecimal(row.package_content,6)!==scaledDecimal(payload.package_content,6))) throw new Error('Este producto tiene stock: creá otra presentación para cambiar su contenido');
-            const updated={...row,flavor:payload.flavor,storage_detail:payload.storage_detail,storage_location:payload.storage_location,unit_content:payload.unit_content,unit_content_unit:payload.unit_content_unit,revision:editingRevision+1,product_name:payload.product,product_brand:payload.brand,product_ptype:payload.ptype,product_psubtype:payload.psubtype,product_class:payload.category,product_all:[payload.product,payload.brand,payload.ptype,payload.psubtype].filter(Boolean).join(', ')};
+            const updated={...row,stock_pattern:payload.stock_pattern,storage_locations:payload.stock_pattern==='irregular' ? [] : row.storage_locations,flavor:payload.flavor,storage_detail:payload.storage_detail,storage_location:payload.storage_location,unit_content:payload.unit_content,unit_content_unit:payload.unit_content_unit,revision:editingRevision+1,product_name:payload.product,product_brand:payload.brand,product_ptype:payload.ptype,product_psubtype:payload.psubtype,product_class:payload.category,product_all:[payload.product,payload.brand,payload.ptype,payload.psubtype].filter(Boolean).join(', ')};
             if(payload.sale_mode) Object.assign(updated,{sale_mode:payload.sale_mode,content_unit:payload.content_unit,package_content:payload.package_content,unit_status:'confirmed',presentation:payload.sale_mode==='package' ? decimalText(scaledDecimal(payload.package_content,6)/(payload.content_unit==='unit' ? 1n : 1000n),6) : '1.000000'});
             updated.display_label=payload.display_label;updated.product_all=productLabel(updated);
             await queueOperationUnlocked('product_edit',payload,updated);
@@ -970,7 +1101,46 @@ async function saveProductEdit() {
     } catch(error) {notice('No se guardó: '+error.message+'. Los campos se conservaron.');}
     finally {saving=false;}
 }
+let similarProductBaseline=null;
+function productIdentity(product) {
+    const number=value=>value==null || value==='' ? '' : scaledDecimal(String(value),6).toString();
+    return JSON.stringify([
+        catalogLabelKey(product.product ?? product.product_name,'product_name'),
+        ...[product.brand ?? product.product_brand,product.ptype ?? product.product_ptype,product.psubtype ?? product.product_psubtype,product.flavor,product.category ?? product.product_class].map(value=>catalogLabelKey(value,'')),
+        product.sale_mode || '',product.content_unit || '',number(product.package_content),number(product.unit_content),product.unit_content_unit || ''
+    ]);
+}
+function newProductCharacteristics() {
+    return {product:$('product').value,brand:$('brand').value,ptype:$('ptype').value,psubtype:$('psubtype').value,flavor:$('new_flavor').value,category:$('new_category').value,...productSpecification('new_')};
+}
+function clearSimilarProduct() {similarProductBaseline=null;$('similar_product_notice').hidden=true;updateSimilarProductControls();}
+function updateSimilarProductControls() {
+    let unchanged=false;
+    if(similarProductBaseline){try{unchanged=productIdentity(newProductCharacteristics())===similarProductBaseline;}catch{unchanged=true;}}
+    for(const button of $('new_product_form').querySelectorAll('button[onclick="save_product_form()"],button[onclick="save_product_form(true)"]'))button.disabled=unchanged;
+    if(similarProductBaseline){$('similar_product_notice').hidden=false;$('similar_product_notice').textContent=unchanged?'Crear similar: cambiá alguna característica para habilitar el guardado.':'Crear similar: se guardará como un producto nuevo.';}
+}
+for(const eventName of ['input','change'])$('new_product_form').addEventListener(eventName,updateSimilarProductControls);
+async function assertNewProductUnique(payload) {
+    const identity=productIdentity(payload);
+    if((await localRead('catalog')).some(row=>productIdentity(row)===identity))throw Error('Ya existe un producto con esas mismas características. Cambiá los datos o usá el producto existente.');
+}
+async function createSimilarProduct() {
+    const id=$('product_actions').dataset.productId;
+    const row=(await localRead('catalog')).find(product=>product.id===id);if(!row)return;
+    clearSimilarProduct();clearNewProductPlace();comparisonShelfDraft=null;comparisonProductDraft=null;setComparisonRegistration(false);
+    $('new_product_form').reset();$('new_barcode').value='';
+    for(const [field,value] of [['product',row.product_name],['brand',row.product_brand],['ptype',row.product_ptype],['psubtype',row.product_psubtype],['new_flavor',row.flavor],['new_category',row.product_class]])$(field).value=value || '';
+    $('new_stock_pattern').value=row.stock_pattern || 'stable';
+    $('new_sale_mode').value=row.sale_mode==='package'&&row.content_unit==='unit'&&Number(row.package_content)>1?'multipack':row.sale_mode || 'package';
+    $('new_content_unit').value=row.sale_mode==='fractional' ? (row.content_unit==='ml'?'l':'kg') : row.content_unit || 'g';
+    $('new_package_content').value=row.package_content==null?String(Number(row.presentation || 1)*1000):String(Number(row.package_content));
+    $('new_unit_content').value=row.unit_content==null?'':String(Number(row.unit_content));$('new_unit_content_unit').value=row.unit_content_unit || 'g';$('new_total_content').dataset.source='each';recalculatePackContents('new_');
+    updateNewProductFields();similarProductBaseline=productIdentity(newProductCharacteristics());updateSimilarProductControls();
+    await closeProductActions(false);showModule('new');
+}
 async function newPresentationFromEdit() {
+    clearSimilarProduct();
     if(!editingProduct) return;
     const row=(await localRead('catalog')).find(p=>p.id===editingProduct);if(!row) return;
     for(const [id,value] of [['product',$('edit_name').value],['brand',$('edit_brand').value],['ptype',$('edit_type').value],['psubtype',$('edit_subtype').value]]) $(id).value=value;
@@ -1005,19 +1175,23 @@ save_product_form = async function (addShelf=false) {
         const name=$('product').value.trim(); if (!name) throw new Error('Ingresá el nombre del producto');
         let presentation='1.000000';
         const payload={product:name,brand:$('brand').value.trim(),ptype:$('ptype').value.trim() || null,psubtype:$('psubtype').value.trim() || null,presentation};
+        payload.stock_pattern=$('new_stock_pattern').value;
         payload.category=$('new_category').value.trim() || null;
         payload.flavor=$('new_flavor').value.trim();
-        payload.storage_location='';
-        payload.storage_detail='';
+        payload.storage_location=newProductStoragePlace?.location || '';
+        payload.storage_detail=newProductStoragePlace?.detail || '';
+        if(newProductStoragePlace){payload.storage_locations=[{...newProductStoragePlace}];if(payload.stock_pattern==='irregular')throw Error('Para asignar esta ubicación, elegí regularidad Estable');}
         payload.display_label=null;
         if ($('new_barcode').value.trim()) payload.barcode=validBarcode($('new_barcode').value);
         Object.assign(payload,productSpecification('new_'));
+        if(similarProductBaseline && productIdentity(payload)===similarProductBaseline)throw Error('Cambiá alguna característica antes de crear un producto similar');
+        await assertNewProductUnique(payload);
         const fractionalPurchase=payload.sale_mode==='fractional' && !addShelf ? fractionalPurchaseValues($('new_fractional_price').value,$('new_fractional_total').value) : null;
         const fractionalShelfPrice=payload.sale_mode==='fractional' && addShelf ? adjustedPrice($('new_fractional_price').value,false) : null;
         if (payload.sale_mode==='package') payload.presentation=decimalText(scaledDecimal(payload.package_content,6)/(payload.content_unit==='unit' ? 1n : 1000n),6);
         presentation=payload.presentation;
         if (Object.values(payload).some(value => typeof value === 'string' && value.length > 255)) throw new Error('Los textos admiten hasta 255 caracteres');
-        const row={id:identifier(),flavor:payload.flavor,storage_detail:payload.storage_detail,storage_location:payload.storage_location,unit_content:payload.unit_content,unit_content_unit:payload.unit_content_unit,created_at:new Date().toISOString(),product_all:[name,payload.brand,payload.ptype,payload.psubtype].filter(Boolean).join(', '),product_name:name,product_brand:payload.brand,product_ptype:payload.ptype,product_psubtype:payload.psubtype,product_class:payload.category,presentation,normal_price:null,normal_unit:null};
+        const row={id:identifier(),stock_pattern:payload.stock_pattern,flavor:payload.flavor,storage_detail:payload.storage_detail,storage_location:payload.storage_location,unit_content:payload.unit_content,unit_content_unit:payload.unit_content_unit,created_at:new Date().toISOString(),product_all:[name,payload.brand,payload.ptype,payload.psubtype].filter(Boolean).join(', '),product_name:name,product_brand:payload.brand,product_ptype:payload.ptype,product_psubtype:payload.psubtype,product_class:payload.category,presentation,normal_price:null,normal_unit:null};
         if (payload.sale_mode) Object.assign(row,{sale_mode:payload.sale_mode,content_unit:payload.content_unit,package_content:payload.package_content,unit_status:'confirmed',revision:1});
         row.display_label=payload.display_label;row.product_all=productLabel(row);
         if(comparisonShelfDraft) {
@@ -1027,8 +1201,12 @@ save_product_form = async function (addShelf=false) {
             notice('Completá y guardá el precio de góndola para crear el producto.');
             return;
         }
-        await queueOperation('product',payload,row);
+        const saveUnique=async()=>{await assertNewProductUnique(payload);await queueOperationUnlocked('product',payload,row);};
+        if(navigator.locks)await navigator.locks.request('mercado-local-save',saveUnique);else await saveUnique();
+        clearSimilarProduct();
+        clearNewProductPlace();
         for(const field of ['product','brand','ptype','psubtype','new_category','new_flavor','new_unit_content','new_total_content','new_barcode','new_package_content']) $(field).value='';
+        $('new_stock_pattern').value='stable';$('new_stock_pattern').editorCaptionUpdate?.();
         $('new_unit_content_unit').value='g';
         $('new_sale_mode').value='package';$('new_content_unit').value='g';updateNewProductFields();
         await closeProductEditor(false);await closeShelfPrice(false);
@@ -1046,7 +1224,7 @@ save_product_form = async function (addShelf=false) {
         } else if(fractionalPurchase) {
             const state=await shoppingState(),branch=state.branches.find(b=>b.id===$('purchase_branch').value);
             if(branch) {
-                await addCartItem({product_id:row.id,...fractionalPurchase,is_promotion:false,market:(branch.name+' · '+(branch.address || 'Local sin confirmar')).slice(0,255),branch_id:branch.id,...eventFields(),add_to_stock:true,stock_quantity:decimalText(scaledDecimal(fractionalPurchase.quantity,6)*1000n,6),stock_unit:row.content_unit,product_revision:1,location:stockPlaceLabel(productStorageLocations(row)[0]) || 'Despensa',expires_on:null,expiry_source:'exact'});
+                await addCartItem({product_id:row.id,...fractionalPurchase,is_promotion:false,market:(branch.name+' · '+(branch.address || 'Local sin confirmar')).slice(0,255),branch_id:branch.id,...eventFields(),add_to_stock:true,stock_quantity:decimalText(scaledDecimal(fractionalPurchase.quantity,6)*1000n,6),stock_unit:row.content_unit,product_revision:1,location:row.stock_pattern==='irregular' ? 'Sin ubicación' : stockPlaceLabel(productStorageLocations(row)[0]) || 'Despensa',expires_on:null,expiry_source:'exact'});
                 await read_products();await renderStock();await renderShopping();openModuleSection('search_section');
                 notice('Producto guardado y agregado al carrito. Confirmá la compra al pasar por caja.');
             } else {
@@ -1080,7 +1258,7 @@ save_instance_form = async function () {
             if (product.unit_status!=='confirmed') throw new Error('Confirmá la unidad en Productos → Editar antes de sumar esta compra');
             const multiplier=product.sale_mode==='package' ? scaledDecimal(product.package_content,6,true) : product.sale_mode==='fractional' ? 1000000000n : 1000000n;
             const stock_quantity=decimalText(roundedDivide(quantityValue*multiplier,1000000n),6);
-            Object.assign(payload,{add_to_stock:true,stock_quantity,stock_unit:product.content_unit,product_revision:product.revision,location:stockPlaceLabel(productStorageLocations(product)[0]) || 'Despensa',expires_on:null,expiry_source:'exact'});
+            Object.assign(payload,{add_to_stock:true,stock_quantity,stock_unit:product.content_unit,product_revision:product.revision,location:product.stock_pattern==='irregular' ? 'Sin ubicación' : stockPlaceLabel(productStorageLocations(product)[0]) || 'Despensa',expires_on:null,expiry_source:'exact'});
         }
         await addCartItem(payload);
         reset_form();notice('Producto agregado al carrito. Todavía no se registró la compra.');
@@ -1143,7 +1321,7 @@ async function registerComparisonShelf() {
         if(row && content===scaledDecimal(row.sale_mode==='fractional' ? '1' : row.presentation,6,true)) {
             comparisonShelfDraft=null;await closeProductActions(false);await openShelfPrice(row);fillComparisonShelf(draft);return;
         }
-        comparisonShelfDraft=draft;setComparisonRegistration(true);
+        clearSimilarProduct();comparisonShelfDraft=draft;setComparisonRegistration(true);
         for(const [id,value] of [['product',row?.product_name],['brand',row?.product_brand],['ptype',row?.product_ptype],['psubtype',row?.product_psubtype],['new_category',row?.product_class],['new_flavor',row?.flavor]]) $(id).value=value || '';
         const sourceUnit=$('compare_content_unit').value;
         const targetUnit=row?.content_unit || (content>=10000000n ? 'g' : 'kg');

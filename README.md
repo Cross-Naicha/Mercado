@@ -107,3 +107,47 @@ Agregar al carrito guarda una selección en el dispositivo sin registrar gastos,
 Confirmar compra registra todas las líneas y vacía el carrito en una transacción local; un error de validación conserva el carrito completo. La fecha de compra es la de confirmación. Los reintentos de sincronización conservan identificadores para evitar duplicados. El servidor sincroniza cada línea por separado, por lo que pueden quedar líneas pendientes de revisión. El carrito funciona sin conexión, se conserva al cerrar y se incluye en exportar/recuperar pendientes; es propio de cada dispositivo.
 
 No requiere migración de MySQL. IndexedDB incorpora el almacén cart en la versión 5. Verificación: node tests_cart.cjs (navegador temporal y servidor simulado, sin escrituras en MySQL).
+
+## Modo Histórico
+
+Activar ↗ desde el menú flotante de Productos. Al tocar una tarjeta muestra los registros de los últimos 90 días, sin separar compras de observaciones, con mínimo, promedio por registro, máximo y variación del último respecto del primero. Los valores incluyen promociones y se expresan por unidad de compra o por kg/litro en fraccionados. Cada registro indica fecha y supermercado. El modo persiste hasta desactivarlo y es excluyente con Precios.
+
+El historial se descarga con el catálogo y queda disponible sin conexión. Las operaciones pendientes se agregan por identificador para no duplicarlas cuando llegan del servidor; las correcciones reemplazan su observación original. Sin registros se informa explícitamente. No requiere migración MySQL; reiniciar el servidor para cargar la consulta nueva y sincronizar.
+
+## Recorrido de revisión de stock
+
+Al elegir Cocina, la revisión sigue el croquis de izquierda a derecha y de arriba hacia abajo: A, B, C, D, E, F. Los espacios duplicados del croquis se revisan una sola vez; dentro de cada espacio los productos se ordenan por nombre. En otras habitaciones se conserva el orden de sus espacios asignados.
+
+Los productos sin ubicación también aparecen en la revisión. Antes de contarlos u omitirlos se exige guardar habitación y espacio desde el formulario de la tarjeta. Se aplica la ubicación a todas las marcas y presentaciones de la familia, con guardado local y sincronización habitual. Se puede volver atrás o salir sin perder el progreso.
+
+## Productos estables e irregulares
+
+Crear y editar productos incluye Regularidad: Estable (predeterminado) o Irregular. Los irregulares no participan en la revisión guiada ni reciben lugares fijos. Al marcarlos irregulares se borran las ubicaciones asignadas; se conservan compras, precios y existencias anteriores. Las compras nuevas pueden seguir sumando existencias, con la referencia genérica Sin ubicación. En Mi stock se muestran aparte como irregulares y no cuentan como productos pendientes de ubicar.
+
+La elección se guarda offline y se sincroniza. Las ediciones antiguas que no incluyen regularidad conservan el valor vigente. Cambiar a estable vuelve a permitir asignar ubicaciones y revisar. Aplicar python migrate_stock_pattern.py en otras instalaciones (respaldo previo; columna stock_pattern, migración 014). Reiniciar el servidor tras actualizar. Verificación: python tests_stock_pattern.py y node tests_cart.cjs.
+
+## Disponibilidad de productos por sucursal
+
+La disponibilidad (`unknown`, `available`, `unavailable`) es una relación independiente entre producto y sucursal. Se consulta y confirma en `/api/availability`, y el catálogo incluye `availability_by_branch`. Los registros se conservan en la tabla `product_availability` de `data/maps.sqlite3`, separados del dibujo y de las zonas. La fecha `confirmed_at` es nula para estados sin confirmar o disponibles inferidos de ubicaciones anteriores.
+
+En Mapa → Asignar se pueden confirmar estados individuales o de una selección y filtrar por disponibilidad. No disponible significa que el local no ofrece el producto; no representa una falta temporal de stock. Se conserva la ubicación anterior. Asignar una zona confirma Disponible. Borrar zonas no elimina la disponibilidad.
+
+La copia local y su cola de cambios usan `mercado-product-availability-v1`. Los cambios se reintentan al reconectar y cada 30 segundos. Las revisiones protegen frente a confirmaciones concurrentes; ante conflicto, revisar el estado informado por el servidor y volver a confirmar explícitamente. Pruebas: `python tests_availability.py` y `node tests_availability.cjs` (esta última requiere el servidor local y Playwright).
+
+## Recorrer
+
+Elegir Recorrer desde el menú superior, seleccionar sucursal y tocar una zona del mapa para consultar sus productos. También se puede elegir la zona desde el selector y buscar dentro de ella. Ver acciones abre las acciones habituales del producto; Volver a Recorrer recupera la zona elegida. Cambiar zona vuelve al mapa. La consulta usa el catálogo y el mapa guardados en el dispositivo, sin modificar asignaciones. Recorrer también se puede mostrar u ocultar desde las preferencias del menú en Ajustes. Comparte con Productos el menú flotante: volver al inicio, Histórico, Precios y Nuevo producto. Los modos se conservan al cambiar de sección y son excluyentes. En Precios, Mismo precio y Distinto precio usan la sucursal seleccionada en Recorrer. Verificación: node tests_walk.cjs.
+
+En la vista de tarjetas de Recorrer, la barra permite alternar Por fecha, Por tipo y Por marca, buscar y retroceder por los filtros. Sin búsqueda ni filtros, el botón rojo vuelve al mapa. Los selectores de sucursal y zona se muestran únicamente al elegir en el mapa.
+
+## Supermercado general
+
+La S junto a Ajustes despliega el selector de supermercado dentro de la barra superior. La sucursal elegida se guarda en este dispositivo y se comparte entre compras, precios de góndola, lista/ubicaciones, Mapa y Recorrer. Cambiarla desde los selectores existentes también actualiza la selección general. Al cambiar de sucursal, Recorrer vuelve al mapa correspondiente. Las líneas ya agregadas al carrito conservan su local original. Verificación: node tests_active_branch.cjs.
+
+En Recorrer, el botón del ojo en la fila de acciones alterna Pendiente/Revisado. Al cerrarlo, el producto pasa detrás de los pendientes y queda gris; al abrirlo recupera su orden según el filtro vigente. La marca se conserva en la sesión del navegador por sucursal y zona, incluso al recargar. No genera compras, precios ni movimientos de stock. Verificación: node tests_walk_reviewed.cjs.
+
+Recorrer usa el supermercado elegido desde la S de la barra superior. Las zonas se muestran como botones de igual tamaño debajo del mapa; también se pueden tocar directamente en el mapa. Al abrir una zona, el encabezado indica Productos · nombre de la zona.
+
+Sincronizar mapas está en Ajustes → Mapas y asignaciones, junto con el estado y la resolución de conflictos. Se puede ocultar Mapa en las preferencias del menú del teléfono y continuar sincronizando sin abrir el editor.
+
+El botón Sincronizar ahora de Ajustes sincroniza los pendientes y el catálogo, y luego los mapas, sus asignaciones y la disponibilidad. No hay un botón separado para mapas; el estado y los conflictos siguen visibles en Ajustes.

@@ -1,5 +1,5 @@
-const CACHE_NAME = 'mercado-v204-stock-review';
-const FILES = ['/static/text-cursor.svg', '/home', '/static/css/style.css', '/static/js/tabs.js', '/static/js/main.js', '/static/js/offline.js', '/static/js/cart.js', '/static/js/stock.js', '/static/js/shopping.js', '/static/manifest.json', '/static/pwa_icon.png'];
+const CACHE_NAME = 'mercado-v334-settings-order';
+const FILES = ['/static/js/active-branch.js', '/static/js/walk.js', '/static/text-cursor.svg', '/home', '/static/css/style.css', '/static/js/tabs.js', '/static/js/main.js', '/static/js/history.js', '/static/js/offline.js', '/static/js/cart.js', '/static/js/stock.js', '/static/js/shopping.js', '/static/js/maps.js', '/static/js/availability.js', '/static/js/map-products.js', '/static/js/map-sync.js', '/static/js/map-panels.js', '/static/js/map-floating.js', '/static/js/map-selects.js', '/static/manifest.json', '/static/pwa_icon.png'];
 self.addEventListener('install', event => {
     event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(FILES)));
 });

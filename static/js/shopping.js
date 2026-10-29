@@ -186,13 +186,18 @@ async function editBranch(id) {
     $('branch_form_title').textContent=id ? 'Editar local' : 'Nuevo local';
     arrangeEditorFields($('branch_form'));$('branch_form').hidden=false;await renderBranchCards();showModule('stores',{scroll:false});revealProductControls($('branch_form'));
 }
-async function choosePurchaseBranch(id) {
-    const branch=(await shoppingState()).branches.find(b => b.id===id);
-    for(const field of ['purchase_branch','shelf_branch','route_branch']) $(field).value=id;
-    if (branch) {$('market').value=(branch.name+' · '+(branch.address || 'Local sin confirmar')).slice(0,255);$('shelf_market').value=$('market').value;}
+async function choosePurchaseBranch(id,{refresh=true}={}) {
+    const state=await shoppingState(),branch=state.branches.find(b=>b.id===id);
+    id=branch?.id || '';
     await localTransaction(['shopping_choices'],tx=>tx.objectStore('shopping_choices').put({id:'active_branch',branch_id:id}));
-    await renderShelfLocals();
-    await renderPurchaseLocals();
+    window.mercadoActiveBranch=id;
+    for(const field of ['purchase_branch','shelf_branch','route_branch']) {
+        fillSelect(field,state.branches,b=>b.name+' · '+(b.address||'Local sin confirmar'),'Elegí local');$(field).value=id;
+    }
+    $('market').value=branch?(branch.name+' · '+(branch.address||'Local sin confirmar')).slice(0,255):'';$('shelf_market').value=$('market').value;
+    await renderShelfLocals(state);await renderPurchaseLocals(state);
+    document.dispatchEvent(new CustomEvent('mercado-active-branch-change',{detail:{id}}));
+    if(refresh)await renderShopping();
 }
 async function documentOperation(kind,owner_id,data,id=identifier()) {
     const old=(await shoppingState()).documents.find(d => d.id===id);
@@ -212,7 +217,7 @@ async function saveLocation() {
 }
 async function editLocation(id) {
     const row=(await shoppingState()).documents.find(d => d.id===id); if (!row) return;
-    editingLocation=id; const p=row.payload; $('route_branch').value=p.branch_id; $('location_product').value=p.product_id;
+    editingLocation=id; const p=row.payload; await choosePurchaseBranch(p.branch_id); $('route_branch').value=p.branch_id; $('location_product').value=p.product_id;
     for (const [key,field] of [['aisle','aisle'],['aisle_order','order'],['shelf','shelf'],['reference','reference'],['node_id','node']]) $('location_'+field).value=p[key] ?? '';
     $('location_cold').checked=p.cold; $('location_form').open=true; openModuleSection('location_form');
 }
@@ -292,7 +297,9 @@ async function renderShopping() {
     if (!$('assist_product').value && selected_id) $('assist_product').value=selected_id;
     for (const id of ['route_branch','branch_edit','purchase_branch','shelf_branch']) fillSelect(id,state.branches,b => `${b.name} · ${b.address || 'Local sin confirmar'}`,id==='branch_edit' ? 'Nuevo local' : 'Elegí local');
     const remembered=(await localRead('shopping_choices')).find(choice=>choice.id==='active_branch');
-    if(remembered?.branch_id && !$('purchase_branch').value && state.branches.some(branch=>branch.id===remembered.branch_id)) await choosePurchaseBranch(remembered.branch_id);
+    const active=state.branches.some(branch=>branch.id===remembered?.branch_id)?remembered.branch_id:'';
+    if(window.mercadoActiveBranch!==active || ['purchase_branch','shelf_branch','route_branch'].some(id=>$(id).value!==active))await choosePurchaseBranch(active,{refresh:false});
+    document.dispatchEvent(new Event('mercado-shopping-rendered'));
     await renderBranchCards(state);
     await renderShelfLocals(state);
     await renderPurchaseLocals(state);
