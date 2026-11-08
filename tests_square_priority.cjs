@@ -23,12 +23,12 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
  await MercadoAvailability.set(branch.id,[product.id,...(typeof other==='undefined'?[]:[other.id])],'available');
  localStorage.setItem('mercado-branch-map-v1:'+branch.id,JSON.stringify({version:2,rows:16,cols:16,precision:1,cells:Array.from({length:256},(_,i)=>i<2?1:0),shelves:[{id:'a',name:'Almacén',color:'#0f7a66',cells:[0,1]}],assignments:{[product.id]:'a',[other.id]:'a'}}));
  },{product,other,branch});
- await page.locator('#tab-walk').click();await page.locator('#walk_branch option[value="'+branch.id+'"]').waitFor({state:'attached'});await page.locator('#active_branch_toggle').click();await page.locator('#active_branch_select').selectOption(branch.id);await page.waitForFunction(()=>document.getElementById('active_branch_picker').hidden);
+ await page.locator('#section_menu_toggle').click();await page.locator('#tab-walk').click();await page.locator('#walk_branch option[value="'+branch.id+'"]').waitFor({state:'attached'});await page.locator('#active_branch_toggle').click();await page.locator('#active_branch_select').selectOption(branch.id);await page.waitForFunction(()=>document.getElementById('active_branch_picker').hidden);
  await page.locator('#walk_map g[role=button]').click();
 
 
 
- await page.locator('#tab-maps').click();await page.locator('#map_view_products').click();
+ await page.locator('#section_menu_toggle').click();await page.locator('#tab-maps').click();await page.locator('#map_view_products').click();
  await page.evaluate(()=>{document.dispatchEvent(new CustomEvent('mercado-map-zone-picked',{detail:'a'}));document.dispatchEvent(new CustomEvent('mercado-map-cell-picked',{detail:0}));});
  const row=page.locator('.map-product-row[data-product-id="'+product.id+'"]');
  await row.getByRole('button',{name:/^Cuadrado de /}).click();await page.locator('#map_assignment_select_menu').getByRole('option',{name:/^Cuadrado 2 /}).click();
@@ -39,13 +39,13 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
  await row.locator('input[type=checkbox]').check();
  await page.locator('.map-product-row[data-product-id="'+other.id+'"] input[type=checkbox]').check();
  await page.locator('#map_product_apply').click();
- await page.waitForFunction(()=>document.getElementById('map_status').textContent.includes('2 productos guardados'));
+ await page.waitForFunction(()=>document.getElementById('save_status').textContent.includes('2 productos guardados'));
  assert.equal(await page.evaluate(id=>mercadoMapProducts.context().placements[id].cell,product.id),1);
  assert.equal(await page.evaluate(id=>mercadoMapProducts.context().placements[id]??null,other.id),null);
  // Elegir Sin cuadrado explícitamente también prevalece sobre el mapa.
  await row.getByRole('button',{name:/^Cuadrado de /}).click();await page.locator('#map_assignment_select_menu').getByRole('option',{name:'Sin cuadrado',exact:true}).click();
  await row.getByRole('button',{name:/^Asignar /}).click();
- await page.waitForFunction(()=>document.getElementById('map_availability_feedback').textContent.includes('asignado'));
+ await page.waitForFunction(()=>document.getElementById('save_status').textContent.includes('asignado'));
  assert.equal(await page.evaluate(id=>mercadoMapProducts.context().placements[id]??null,product.id),null);
  assert.deepEqual(errors,[]);await page.close();}
  console.log('Prioridad del selector: individual, múltiple, mapa solo región y Sin cuadrado en teléfono/escritorio OK');

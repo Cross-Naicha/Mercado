@@ -31,7 +31,7 @@
     function refresh(){
         const preview=canvas.classList.contains('map-readonly');
         const zoneView=document.getElementById('map_zones_view');const zoomHost=preview&&zoneView?.hidden?document.getElementById('map_preview_header'):card;if(zoomControls.parentElement!==zoomHost)zoomHost.append(zoomControls);card.classList.toggle('map-surface-preview',preview);zoomControls.classList.toggle('map-zoom-horizontal',preview);
-        const ready=window.mercadoMapProducts.context().ready;zoomControls.hidden=!ready;const values=[...zoom.options].map(o=>o.value);zoomIn.disabled=zoom.value===values.at(-1);zoomOut.disabled=zoom.value===values[0];button.hidden=!ready||canvas.classList.contains('map-readonly');undo.hidden=canvas.classList.contains('map-readonly');
+        const ready=window.mercadoMapProducts.context().ready;zoomControls.hidden=!ready;const values=[...zoom.options].map(o=>o.value);zoomIn.disabled=zoom.value===values.at(-1);zoomOut.disabled=zoom.value===values[0];button.hidden=!ready||canvas.classList.contains('map-readonly')||document.getElementById('map_boundary_mode').value!=='off';undo.hidden=canvas.classList.contains('map-readonly');
         const naming=mode.value==='name',label=naming?'Nombrar góndolas':'Dibujar';
         button.dataset.mode=mode.value;button.setAttribute('aria-label','Modo '+label+'. Pulsá para cambiar; arrastrá para mover.');button.title=label+' · Clic para cambiar · Arrastrar para mover';
         button.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'+icons[naming?'name':'draw']+'</svg>';

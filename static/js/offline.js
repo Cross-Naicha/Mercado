@@ -21,7 +21,6 @@ function unifyCatalogLabels(rows) {
     }
     return rows.map(row=>{const result={...row};for(const field of fields) {const value=labels[field].get(catalogLabelKey(row[field],field));if(value) result[field]=value.charAt(0).toLocaleUpperCase('es')+value.slice(1);}result.product_all=productLabel(result);return result;}).sort((a,b)=>a.product_all.localeCompare(b.product_all,'es',{sensitivity:'base',numeric:true}));
 }
-function notice(message) { $('save_status').textContent = message;$('save_status').hidden=!message; }
 function productLabel(row) {
     const parts=[[row.product_name,row.product_ptype,row.product_psubtype,row.flavor].filter(Boolean).join(' '),row.product_brand];
     if(row.sale_mode==='package' && row.package_content) {
@@ -65,6 +64,30 @@ open_database = function () {
         req.onblocked = () => notice('Cerrá las otras pestañas de Mercado para actualizar el guardado local.');
     });
 };
+async function pendingLotProducts() {
+    try {
+        const stock=await projectedStock();
+        return new Map(stock.lots.map(lot=>[lot.id,lot.product_id]));
+    } catch (_) { return new Map(); }
+}
+function pendingDependencies(op,queue,lotProducts=new Map()) {
+    const ids=new Set(op.depends_on || []);
+    if(op.payload.product_id) for(const item of queue) if(item.kind==='product'&&item.entity_id===op.payload.product_id) ids.add(item.operation_id);
+    const productId=op.payload.product_id||lotProducts.get(op.payload.lot_id);
+    const stockKinds=new Set(['stock_initial','stock_move','stock_count','stock_transfer','purchase']);
+    return queue.filter(item=>{
+        if(!ids.has(item.operation_id))return false;
+        if(['stock_count','stock_transfer'].includes(op.kind)&&stockKinds.has(item.kind)) {
+            const previousProduct=item.payload.product_id||lotProducts.get(item.payload.lot_id);
+            if(productId&&previousProduct&&productId!==previousProduct)return false;
+        }
+        return true;
+    });
+}
+function pendingTitle(op,catalog) {
+    const product=catalog.find(row=>row.id===op.payload.product_id||row.id===op.entity_id);
+    return op.payload.product||(product?productLabel(product):'')||op.payload.market||op.payload.name||op.payload.note||op.kind;
+}
 async function updateStatus(message) {
     const queue = await localRead('outbox');
     const lastSync=(await localRead('shopping_cache')).find(row=>row.id==='last_sync');
@@ -74,12 +97,12 @@ async function updateStatus(message) {
     $('sync_status').textContent = `${queue.length} pendientes${syncing ? ' · Sincronizando…' : ''}${message ? ' · ' + message : ''}`;
     if(queue.some(op=>op.error && op.error!=='Esperando conexión con tu PC')) {
         const review=document.createElement('button');review.type='button';review.textContent='Ver errores';
-        review.onclick=()=>{showModule('settings');$('pending_details').open=true;};$('sync_status').append(' ',review);
+        review.onclick=()=>openPendingRecords({errorsOnly:true});$('sync_status').append(' ',review);
     }
     const attention=queue.filter(op=>op.error_status&&op.error_status<500).length;
     $('pending_count').textContent=String(queue.length);$('pending_count').classList.toggle('needs-attention',attention>0);
     $('pending_caption').textContent=!queue.length?'Todo al día':attention?attention+' '+(attention===1?'registro necesita':'registros necesitan')+' revisión':queue.length+' '+(queue.length===1?'cambio por sincronizar':'cambios por sincronizar');
-    const catalog=await localRead('catalog');
+    const catalog=await localRead('catalog'),lotProducts=await pendingLotProducts();
     const expanded=new Set([...$('pending_list').querySelectorAll('li[data-operation-id]')].filter(item=>item.querySelector('details')?.open).map(item=>item.dataset.operationId));
     $('pending_list').replaceChildren();
     if(!queue.length){const empty=document.createElement('li');empty.className='pending-empty';const icon=document.createElement('span');icon.className='pending-empty-icon';icon.textContent='✓';icon.setAttribute('aria-hidden','true');const title=document.createElement('strong');title.textContent='Todo al día';const text=document.createElement('p');text.textContent='No hay registros esperando sincronización.';empty.append(icon,title,text);$('pending_list').append(empty);}
@@ -87,19 +110,20 @@ async function updateStatus(message) {
         const item = document.createElement('li');
         const names={product:'Producto',product_edit:'Edición de producto',product_delete:'Borrado de producto',shelf_price:'Precio de góndola',purchase:'Compra',occasional_purchase:'Compra ocasional',settings:'Unidad del producto',stock_count:'Recuento de inventario',stock_transfer:'Traslado de existencias',stock_initial:'Stock inicial',stock_move:'Movimiento de stock',minimum:'Mínimo de compra',barcode:'Código de barras',branch:'Sucursal',shopping_document:'Información del súper'};
         item.className='pending-card';item.dataset.operationId=op.operation_id;
-        const needsReview=Boolean(op.error_status&&op.error_status<500),waiting=Boolean(op.error&&!needsReview);
-        item.dataset.state=needsReview?'attention':waiting?'waiting':'ready';
+        const needsReview=Boolean(op.error_status&&op.error_status<500),waiting=Boolean(op.error&&!needsReview),blocked=pendingDependencies(op,queue,lotProducts).length>0;
+        item.dataset.state=needsReview?'attention':waiting||blocked?'waiting':'ready';
+        item.dataset.hasError=String(Boolean(op.error&&op.error!=='Esperando conexión con tu PC'));
         const header=document.createElement('div');header.className='pending-card-header';
         const kind=document.createElement('span');kind.className='pending-kind';kind.textContent=names[op.kind]||'Cambio pendiente';
-        const badge=document.createElement('span');badge.className='pending-badge';badge.textContent=needsReview?'Revisar':waiting?'Sin conexión':'Por sincronizar';header.append(kind,badge);
-        const title=document.createElement('strong');title.className='pending-card-title';const product=catalog.find(row=>row.id===op.payload.product_id||row.id===op.entity_id);
-        title.textContent=op.payload.product||(product?productLabel(product):'')||op.payload.market||op.payload.name||op.payload.note||names[op.kind]||'Cambio guardado';
-        const state=document.createElement('p');state.className='pending-card-state';state.textContent=op.error||'Guardado en este dispositivo. Listo para sincronizar.';
+        const badge=document.createElement('span');badge.className='pending-badge';badge.textContent=needsReview?'Revisar':waiting?'Sin conexión':blocked?'En espera':'Por sincronizar';header.append(kind,badge);
+        const title=document.createElement('strong');title.className='pending-card-title';title.textContent=pendingTitle(op,catalog)||names[op.kind]||'Cambio guardado';
+        const state=document.createElement('p');state.className='pending-card-state';state.textContent=op.error||(blocked?'Esperando que se sincronice otro cambio pendiente.':'Guardado en este dispositivo. Listo para sincronizar.');
         item.append(header,title,state);
         const date=new Date(op.created_at);if(Number.isFinite(date.getTime())){const time=document.createElement('time');time.className='pending-card-date';time.dateTime=op.created_at;time.textContent=date.toLocaleString('es-AR',{dateStyle:'short',timeStyle:'short',hourCycle:'h23'});item.append(time);}
         const details=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Ver detalle y opciones';details.className='pending-card-details';details.open=expanded.has(op.operation_id);details.append(summary);
         const labels={product:'Producto',brand:'Marca',ptype:'Tipo',psubtype:'Subtipo',display_label:'Etiqueta',presentation:'Presentación interna',quantity:'Cantidad',price:'Precio',total_paid:'Importe total',market:'Comercio',is_promotion:'Es promoción',promotion_description:'Descripción de promoción',sale_mode:'Modalidad',content_unit:'Unidad',package_content:'Contenido',promotion:'Promoción',special_quantity:'Cantidad de la oferta',special_total:'Importe de la oferta',note:'Nota',location:'Ubicación',expires_on:'Vencimiento'};
         const form=document.createElement('form'),inputs={};form.className='pending-correction-form';
+        const countConflict=op.kind==='stock_count'&&op.error_status===409&&/existencias cambiaron/i.test(op.error||'');
         for(const [key,value] of Object.entries(op.payload)) {
             if(key==='display_label') continue;
             if(!labels[key]) continue;
@@ -109,11 +133,11 @@ async function updateStatus(message) {
             if(choices[key]) for(const [optionValue,text] of Object.entries(choices[key])) {const option=document.createElement('option');option.value=optionValue;option.textContent=text;input.append(option);}
             else input.type=typeof value==='boolean' ? 'checkbox' : 'text';
             if(input.type==='checkbox') input.checked=value;else input.value=value ?? '';
-            input.disabled=!op.error_status || op.error_status>=500 || (op.kind==='purchase' && key==='price');
+            input.disabled=!op.error_status || op.error_status>=500 || (op.kind==='purchase' && key==='price') || (countConflict&&key==='location');
             label.append(input);form.append(label);inputs[key]=input;
         }
-        const save=document.createElement('button');save.type='submit';save.textContent='Guardar corrección y reintentar';save.disabled=!op.error_status || op.error_status>=500;
-        save.className='pending-save';form.append(save);form.onsubmit=async event=>{event.preventDefault();await correctPending(op.operation_id,inputs);};details.append(form);
+        const save=document.createElement('button');save.type='submit';save.textContent=countConflict?'Revisar recuento y reintentar':'Guardar corrección y reintentar';save.disabled=!op.error_status || op.error_status>=500;
+        save.className='pending-save';form.append(save);form.onsubmit=async event=>{event.preventDefault();if(countConflict)await rebasePendingCount(op.operation_id,inputs);else await correctPending(op.operation_id,inputs);};details.append(form);
         if(op.payload.product_id) {
             const edit=document.createElement('button');edit.type='button';edit.textContent='Revisar unidad y datos del producto';
             edit.onclick=async()=>{showModule('products');await editProduct(op.payload.product_id);};details.append(edit);
@@ -127,6 +151,56 @@ async function updateStatus(message) {
         $('pending_list').append(item);
     }
 }
+async function reportPendingSync() {
+    const key='mercado-sync-diagnostics-device';
+    let deviceId=localStorage.getItem(key);
+    if(!deviceId){deviceId=crypto.randomUUID();localStorage.setItem(key,deviceId);}
+    const queue=await localRead('outbox'),catalog=await localRead('catalog'),lotProducts=await pendingLotProducts();
+    const entries=queue.map(op=>{
+        const blocked=pendingDependencies(op,queue,lotProducts).map(item=>item.operation_id);
+        const productId=op.payload.product_id || (op.kind==='product' ? op.entity_id : null);
+        const values=['stock_count','stock_transfer'].includes(op.kind) ? {location:String(op.payload.location||''),expected_balance:String(op.payload.expected_balance||''),quantity:String(op.payload.quantity||'')} : {};
+        return {operation_id:op.operation_id,entity_id:op.entity_id,product_id:productId,kind:op.kind,
+            title:String(pendingTitle(op,catalog)).slice(0,255),state:op.error_status&&op.error_status<500?'error':op.error?'waiting':blocked.length?'blocked':'ready',
+            error:op.error ? String(op.error).slice(0,1000) : null,error_status:op.error_status || null,blocked_by:blocked.slice(0,100),values};
+    });
+    await serverRequest('/api/sync/diagnostics',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({device_id:deviceId,entries})});
+}
+async function refreshSyncDiagnostics() {
+    const list=$('sync_diagnostics_list'),status=$('sync_diagnostics_status');
+    status.textContent='Consultando la PC…';
+    try {
+        const data=await serverRequest('/api/sync/diagnostics');
+        const pending=Array.isArray(data.pending)?data.pending:[],failures=Array.isArray(data.failures)?data.failures:[];
+        const catalog=await localRead('catalog'),products=new Map(catalog.map(row=>[row.id,row]));
+        const byId=new Map(pending.map(item=>[item.operation_id,item]));
+        const entries=[...pending.map(item=>({...item,serverFailure:failures.find(error=>error.operation_id===item.operation_id)})),
+            ...failures.filter(item=>!byId.has(item.operation_id)).map(item=>({...item,state:'error'}))];
+        entries.sort((a,b)=>({error:0,blocked:1,waiting:2,ready:3}[a.state]??4)-({error:0,blocked:1,waiting:2,ready:3}[b.state]??4)||b.last_seen.localeCompare(a.last_seen));
+        $('sync_diagnostics_count').textContent=String(entries.length);
+        list.replaceChildren();
+        for(const entry of entries) {
+            const item=document.createElement('li');item.className='pending-card';item.dataset.state=entry.state==='error'?'attention':entry.state==='blocked'||entry.state==='waiting'?'waiting':'ready';
+            const header=document.createElement('div');header.className='pending-card-header';
+            const kind=document.createElement('span');kind.className='pending-kind';kind.textContent=entry.kind;
+            const badge=document.createElement('span');badge.className='pending-badge';badge.textContent=entry.state==='error'?'Error '+(entry.error_status||entry.status):entry.state==='blocked'?'En espera':entry.state==='waiting'?'Sin conexión':'Por sincronizar';header.append(kind,badge);
+            const title=document.createElement('strong');title.className='pending-card-title';title.textContent=entry.title||products.has(entry.product_id)&&productLabel(products.get(entry.product_id))||entry.product_id||entry.entity_id;
+            const reason=document.createElement('p');reason.className='pending-card-state';
+            const blockers=(entry.blocked_by||[]).map(id=>byId.get(id)?.title||id);
+            reason.textContent=entry.error||entry.serverFailure?.detail||entry.detail||(blockers.length?'Esperando: '+blockers.join(', '):'Listo para sincronizar desde el teléfono.');
+            item.append(header,title,reason);
+            if(entry.values?.quantity) {
+                const values=document.createElement('p');values.className='pending-card-state';
+                values.textContent='Ubicación: '+(entry.values.location||'sin indicar')+' · Cantidad guardada: '+entry.values.quantity+' · Existencias que esperaba el teléfono: '+entry.values.expected_balance;
+                item.append(values);
+            }
+            const time=document.createElement('time');time.className='pending-card-date';time.dateTime=entry.last_seen;time.textContent='Último intento: '+new Date(entry.last_seen).toLocaleString('es-AR',{dateStyle:'short',timeStyle:'short',hourCycle:'h23'});
+            item.append(time);list.append(item);
+        }
+        status.textContent=entries.length?'Estados recibidos de los dispositivos.':'No hay pendientes ni errores registrados en la PC.';
+    } catch(error) {status.textContent='No se pudieron consultar los estados: '+error.message;}
+}
+$('sync_diagnostics').addEventListener('toggle',()=>{if($('sync_diagnostics').open)void refreshSyncDiagnostics();});
 async function discardPendingEdit(id) {
     if(syncing || saving) {notice('Esperá a que termine la sincronización y volvé a intentarlo.');return;}
     saving=true;syncing=true;
@@ -143,7 +217,7 @@ async function discardPendingEdit(id) {
         await localTransaction(['outbox','catalog'],tx=>{tx.objectStore('outbox').delete(id);tx.objectStore('catalog').put(row);});
         await closeProductEditor(false);$('search').value='';resetCatalogFilters();
         await read_products();await renderStock();await renderShopping();
-        notice('Edición descartada. Se recuperaron los datos del servidor.');
+        notice('Edición descartada. Se recuperaron los datos del servidor.', {success:true});
     } catch(error) {notice('No se descartó: '+error.message+'. La edición sigue guardada en este teléfono.');}
     finally {saving=false;syncing=false;await updateStatus();}
 }
@@ -181,10 +255,47 @@ async function correctPending(id,inputs) {
         const row=op.kind==='product' ? (await localRead('catalog')).find(p=>p.id===op.entity_id) : null;
         if(row) {Object.assign(row,{product_name:payload.product,product_brand:payload.brand,product_ptype:payload.ptype,product_psubtype:payload.psubtype,display_label:payload.display_label,presentation:payload.presentation,sale_mode:payload.sale_mode,content_unit:payload.content_unit,package_content:payload.package_content});row.product_all=productLabel(row);}
         await localTransaction(['outbox','stock_effects','catalog'],tx=>{tx.objectStore('outbox').put(op);if(effect) tx.objectStore('stock_effects').put({id:op.operation_id,...effect});if(row) tx.objectStore('catalog').put(row);});
-        notice('Corrección guardada en este teléfono.');
+        notice('Corrección guardada en este teléfono.', {success:true});
     } catch(error) {notice('No se corrigió: '+error.message);}
     finally {saving=false;syncing=false;await updateStatus();}
+    if($('pending_list').contains(document.activeElement))document.activeElement.blur();
     void sync_pending();
+}
+function pendingDescendants(id,queue) {
+    const excluded=new Set([id]);
+    let changed=true;
+    while(changed) {
+        changed=false;
+        for(const item of queue) if(!excluded.has(item.operation_id)&&(item.depends_on||[]).some(dependency=>excluded.has(dependency))) {
+            excluded.add(item.operation_id);changed=true;
+        }
+    }
+    return excluded;
+}
+async function rebasePendingCount(id,inputs) {
+    if(syncing||saving){notice('Esperá a que termine la sincronización y volvé a intentarlo.');return;}
+    saving=true;syncing=true;let retry=false;
+    try {
+        const queue=await localRead('outbox'),op=queue.find(item=>item.operation_id===id);
+        if(!op||op.kind!=='stock_count'||op.error_status!==409)throw Error('El recuento ya no necesita esta revisión');
+        if(pendingDependencies(op,queue,await pendingLotProducts()).length)throw Error('Revisá primero los cambios anteriores de este producto');
+        await refreshStock();
+        const snapshot=(await localRead('stock_cache')).find(item=>item.id==='snapshot');
+        if(snapshot?.confirmed_operations?.includes(id))throw Error('El recuento ya fue aplicado; reintentá sincronizar para actualizar el teléfono');
+        const excluded=pendingDescendants(id,queue),data=await projectedStock(excluded);
+        const lots=data.lots.filter(lot=>lot.product_id===op.payload.product_id&&lot.location===op.payload.location);
+        const current=lots.reduce((sum,lot)=>sum+balanceOf(data,lot.id),0n);
+        const target=scaledDecimal(inputs.quantity.value,6),product=(await localRead('catalog')).find(row=>row.id===op.payload.product_id);
+        if(product?.content_unit==='unit'&&target%1000000n)throw Error('Ingresá unidades enteras');
+        const unit=product?.content_unit||'unidades';
+        if(!confirm('El servidor tiene '+decimalText(current,6)+' '+unit+' en '+op.payload.location+'. Tu recuento indica '+decimalText(target,6)+' '+unit+'. ¿Aplicar el recuento sobre las existencias actuales?'))return;
+        op.payload.quantity=decimalText(target,6);
+        const effect=await stockEffect(op,{rebaseCount:true,excludedOperations:excluded});
+        delete op.error;delete op.error_status;
+        await localTransaction(['outbox','stock_effects'],tx=>{tx.objectStore('outbox').put(op);tx.objectStore('stock_effects').put({id:op.operation_id,...effect});});
+        notice('Recuento actualizado con las existencias actuales del servidor.', {success:true});retry=true;
+    } catch(error) {notice('No se actualizó el recuento: '+error.message);}
+    finally {saving=false;syncing=false;await updateStatus();if(retry){if($('pending_list').contains(document.activeElement))document.activeElement.blur();void sync_pending();}}
 }
 async function serverRequest(url, options = {}) {
     const controller = new AbortController();
@@ -228,17 +339,26 @@ async function sync_pending() {
     syncing = true;
     let outcome = 'Servidor disponible',complete=true;
     try {
-        const queue = await localRead('outbox');
+        const queue = await localRead('outbox'),lotProducts=await pendingLotProducts();
         const priority=kind => kind==='product' ? 0 : 1;
         queue.sort((a,b) => priority(a.kind)-priority(b.kind) || (a.sequence || 0)-(b.sequence || 0) || a.created_at.localeCompare(b.created_at));
         for (const op of queue) {
-            if (op.depends_on && (await localRead('outbox')).some(item => op.depends_on.includes(item.operation_id))) continue;
-            if (op.payload.product_id && (await localRead('outbox')).some(item => item.kind==='product' && item.entity_id===op.payload.product_id)) continue;
+            if (pendingDependencies(op,await localRead('outbox'),lotProducts).length) continue;
             await updateStatus();
             try {
                 const receipt = await serverRequest('/api/sync', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({operation_id: op.operation_id, entity_id: op.entity_id, kind: op.kind, payload: op.payload})});
                 if (receipt.operation_id !== op.operation_id || receipt.entity_id !== op.entity_id || receipt.status !== 'confirmed') throw new Error('Confirmación inválida');
-                await localTransaction(['outbox'], tx => tx.objectStore('outbox').delete(op.operation_id));
+                await localTransaction(['catalog','outbox'], tx => {
+                    if(['purchase','shelf_price'].includes(op.kind)) {
+                        const request=tx.objectStore('catalog').get(op.payload.product_id);
+                        request.onsuccess=()=>{
+                            if(!request.result)return;
+                            applyPriceOperations([request.result],[{...op,confirmed:true}]);
+                            tx.objectStore('catalog').put(request.result);
+                        };
+                    }
+                    tx.objectStore('outbox').delete(op.operation_id);
+                });
             } catch (error) {
                 complete=false;
                 op.attempts = (op.attempts || 0) + 1;
@@ -259,7 +379,7 @@ async function sync_pending() {
         await renderStock();
         await renderShopping();
     } catch (error) { notice('No se pudo completar la sincronización: ' + error.message); }
-    finally { syncing = false; await updateStatus(outcome); }
+    finally { syncing = false; await updateStatus(outcome);void reportPendingSync().catch(()=>{});if($('sync_diagnostics').open)void refreshSyncDiagnostics(); }
 }
 let actionProductId=null,shelfProductId=null,shelfEditingObservation=null,catalogRenderGeneration=0,revealedProductId=null,productFilterSnapshot=null;
 let priceComparisonProduct=null;
@@ -290,7 +410,11 @@ async function setPricesMode(enabled) {
 }
 function updateStockPatternFields() {
     const irregular=$('edit_stock_pattern').value==='irregular';
-    for(const id of ['edit_storage_location','edit_storage_detail']) {const input=$(id);const row=input.closest('.editor-field-row') || input.closest('label');row.hidden=irregular;input.disabled=irregular;}
+    for (const id of ['edit_storage_location','edit_storage_detail']) {
+        const input = $(id);
+        (input.closest('.product-edit-suggest-field') || input.closest('label')).hidden = irregular;
+        input.disabled = irregular;
+    }
 }
 async function setHistoryMode(enabled) {
     historyMode=enabled;
@@ -303,33 +427,159 @@ async function setHistoryMode(enabled) {
 async function catalogWithPrices() {
     const rows=await localRead('catalog');
     const pending=(await localRead('outbox')).filter(op=>['purchase','shelf_price'].includes(op.kind)).sort((a,b)=>(a.sequence || 0)-(b.sequence || 0));
+    return applyPriceOperations(rows,pending);
+}
+function isPromotionalPrice(option) {
+    return Boolean(option.promotion || (option.conditions && option.conditions !== 'none'));
+}
+function regularProductPrices(row) {
+    return row.regular_price_options ?? (row.price_options || []).filter(option => !isPromotionalPrice(option));
+}
+function updatePriceOption(options, option) {
+    const local = option.branch_id || option.market || 'unknown';
+    const remaining = options.filter(entry => entry.id !== option.id);
+    const sameLocal = entry => (entry.branch_id || entry.market || 'unknown') === local;
+    if (remaining.some(entry => sameLocal(entry) && Date.parse(entry.occurred_at) > Date.parse(option.occurred_at))) return remaining;
+    return [...remaining.filter(entry => !sameLocal(entry)), option];
+}
+function applyPriceOperations(rows,pending) {
     for(const op of pending) {
         const row=rows.find(p=>p.id===op.payload.product_id);if(!row) continue;
         const p=op.payload,day=new Date(p.occurred_at).toLocaleDateString('sv-SE',{timeZone:p.event_timezone});
         const shelf=op.kind==='shelf_price';let value=p.price;
-        if(shelf) row.shelf_observation={...p,id:p.observation_id || op.entity_id,received_at:p.expected_received_at || null};
-        if(shelf) {
+        const promotion = shelf ? p.promotion !== 'none' : p.is_promotion;
+        const observation = shelf ? {...p, id:p.observation_id || op.entity_id, received_at:p.expected_received_at || null} : null;
+        if (observation && (!row.shelf_observation || observation.id === row.shelf_observation.id
+            || Date.parse(observation.occurred_at) >= Date.parse(row.shelf_observation.occurred_at))) {
+            row.shelf_observation = observation;
+        }
+        if(shelf && !['kg','l'].includes(p.price_basis)) {
             const [units,n,d]=p.promotion==='special' ? [BigInt(p.special_quantity),1n,1n] : shelfPromotion(p.promotion);
             const total=p.promotion==='special' ? scaledDecimal(p.special_total,2)*100n : roundedDivide(scaledDecimal(p.price,4)*n,d*100n)*100n;
             value=decimalText(roundedDivide(total,units),4);
-
-            if(p.promotion==='none' && (!row.normal_date || day>=row.normal_date)) Object.assign(row,{normal_price:p.price,normal_date:day,normal_unit:row.presentation ? String(Number(p.price)/Number(row.presentation)) : null});
+        }
+        if (!promotion && (!row.normal_date || day >= row.normal_date)) {
+            const normalPrice = p.price;
+            Object.assign(row, {normal_price: normalPrice, normal_date: day, normal_unit: row.presentation ? String(Number(normalPrice) / Number(row.presentation)) : null});
         }
         row.price_history=(row.price_history || []).filter(entry=>entry.id!==(p.observation_id || op.entity_id));
         row.price_history.push({id:p.observation_id || op.entity_id,occurred_at:p.occurred_at,event_timezone:p.event_timezone,price:value,market:p.market || ''});
-        row.price_options ||= [];
-        const option={id:p.observation_id || op.entity_id,branch_id:p.branch_id || null,price:value,market:p.market || '',date:day,occurred_at:p.occurred_at,received_at:op.created_at,source:shelf?'shelf':'purchase',promotion:shelf?p.promotion!=='none':p.is_promotion,conditions:shelf?p.promotion:null,description:p.promotion_description || '',pending:true};
-        const local=entry=>entry.branch_id || entry.market || 'unknown';
-        const previous=row.price_options.find(entry=>local(entry)===local(option));
-        if(!previous || previous.id===option.id || Date.parse(option.occurred_at)>=Date.parse(previous.occurred_at))row.price_options=[...row.price_options.filter(entry=>local(entry)!==local(option)),option];
-        if(row.last_price_at ? Date.parse(p.occurred_at)>=Date.parse(row.last_price_at) : !row.last_price_date || day>=row.last_price_date) Object.assign(row,{last_price:value,last_price_date:day,last_price_at:p.occurred_at,last_price_promotion:shelf ? p.promotion!=='none' : p.is_promotion,last_price_pending:true,last_price_source:shelf ? 'shelf' : 'purchase',last_price_conditions:shelf ? p.promotion : null,last_list_price:shelf ? p.price : null,last_price_market:p.market,last_price_description:p.promotion_description || null,last_offer_quantity:p.special_quantity ? String(p.special_quantity) : null,last_offer_total:p.special_total || null});
+        const option={id:p.observation_id || op.entity_id,branch_id:p.branch_id || null,price:value,market:p.market || '',date:day,occurred_at:p.occurred_at,received_at:op.created_at,source:shelf?'shelf':'purchase',promotion,conditions:shelf?p.promotion:null,description:p.promotion_description || '',pending:!op.confirmed};
+        if (observation && promotion) option.shelf_observation=observation;
+        const regularPrices = regularProductPrices(row);
+        if (promotion) {
+            row.regular_price_options = regularPrices.filter(entry => entry.id !== option.id);
+        } else {
+            row.regular_price_options = updatePriceOption(regularPrices, option);
+        }
+        row.price_options = updatePriceOption(row.price_options || [], option);
+        if(row.last_price_at ? Date.parse(p.occurred_at)>=Date.parse(row.last_price_at) : !row.last_price_date || day>=row.last_price_date) Object.assign(row,{last_price:value,last_price_date:day,last_price_at:p.occurred_at,last_price_promotion:promotion,last_price_pending:!op.confirmed,last_price_source:shelf ? 'shelf' : 'purchase',last_price_conditions:shelf ? p.promotion : null,last_list_price:shelf ? p.price : null,last_price_market:p.market,last_price_description:p.promotion_description || null,last_offer_quantity:p.special_quantity ? String(p.special_quantity) : null,last_offer_total:p.special_total || null});
     }
     for(const row of rows)row.best_price=bestKnownProductPrice(row);
     return rows;
 }
-function bestKnownProductPrice(row) {
-    const options=(row.price_options || []).filter(option=>option.price!=null && Number.isFinite(Number(option.price)) && Number(option.price)>=0);
-    return options.reduce((best,option)=>!best || scaledDecimal(option.price,4)<scaledDecimal(best.price,4) || (scaledDecimal(option.price,4)===scaledDecimal(best.price,4) && Date.parse(option.occurred_at)>Date.parse(best.occurred_at)) ? option : best,null);
+function rankedProductPrices(row, options = row.price_options || []) {
+    const latest=new Map();
+    for(const option of options) {
+        if(option.price==null || !Number.isFinite(Number(option.price)) || Number(option.price)<0)continue;
+        const key=option.branch_id || option.market;
+        if(!key)continue;
+        const previous=latest.get(key);
+        if(!previous || Date.parse(option.occurred_at)>=Date.parse(previous.occurred_at))latest.set(key,option);
+    }
+    return [...latest.values()].sort((a,b)=>{
+        const difference=scaledDecimal(a.price,4)-scaledDecimal(b.price,4);
+        return difference<0n ? -1 : difference>0n ? 1 : (Date.parse(b.occurred_at)-Date.parse(a.occurred_at) || String(a.branch_id || a.market).localeCompare(String(b.branch_id || b.market)));
+    });
+}
+function bestKnownProductPrice(row) {return rankedProductPrices(row)[0] || null;}
+function priceFreshness(age) {return age<=7?'fresh':age<=14?'recent':age<=31?'old':'stale';}
+function renderProductPrice(row,option=row.best_price) {
+        const price=document.createElement('div');price.className='product-last-price';
+        const best=option;
+        const value=best?.price ?? row.last_price ?? row.normal_price;
+        price.textContent=value==null ? 'Sin precio registrado' : formatProductPrice(value);
+        if(value!=null && row.sale_mode==='fractional') price.textContent+='/'+(row.content_unit==='g' ? 'kg' : 'litro');
+        const unitPrice=value==null || row.sale_mode==='fractional' ? '' : productUnitPrice(row,value);
+        if(unitPrice) {
+            const normalized=document.createElement('span');normalized.className='product-unit-price';
+            const multiPack=row.sale_mode==='package' && row.content_unit==='unit' && Number(row.package_content)>1;
+            if(multiPack) {
+                normalized.classList.add('product-pack-unit-price');
+                normalized.textContent=unitPrice.replace('/unidad',' por unidad');
+            } else normalized.textContent=' ('+unitPrice+')';
+            price.append(normalized);
+        }
+        const caption=document.createElement('div');caption.className='product-price-caption';
+        const date=best ? best.date : row.last_price_date || row.normal_date;
+        if(value!=null && date) {
+            const age=Math.max(0,priceAgeDays(date));
+            if(Number.isFinite(age)) {
+                price.dataset.freshness=priceFreshness(age);
+                price.title='Precio registrado hace '+age+' día'+(age===1?'':'s');
+                price.setAttribute('aria-label',formatProductPrice(value)+'. '+price.title);
+            }
+        }
+        caption.textContent='';
+        const market=best ? best.market : row.last_price_market,conditions=best ? best.conditions : row.last_price_conditions;
+        const promotion = value != null && isPromotionalPrice(best || {promotion: row.last_price_promotion, conditions});
+        caption.classList.toggle('product-promotion-caption', promotion);
+        if(market)caption.textContent=market;
+        if(date){const days=Math.max(0,priceAgeDays(date));caption.textContent+=(caption.textContent?' · ':'')+days+(days===1?' día':' días');}
+        if(conditions && conditions!=='none')caption.textContent+=' · '+conditions.replace('offer','Oferta').replace('2_50%','Segunda al 50%').replace('2_80%','Segunda al 80%').replace('special','Promoción especial');
+        else if(promotion)caption.textContent+=(caption.textContent ? ' · ' : '')+'Promoción';
+        const description=best ? best.description : row.last_price_description;
+        if(description)caption.textContent+=' · '+description;
+        if(best ? best.pending : row.last_price_pending) caption.textContent+=' · Pendiente de sincronizar';
+        if(value==null) caption.textContent='';
+    let recentBest = null;
+    if (best?.date && best === row.best_price && price.dataset.freshness === 'fresh') {
+        recentBest = document.createElement('span');
+        recentBest.className = 'product-recent-best';
+        recentBest.classList.toggle('product-recent-best-promotion', promotion);
+        recentBest.textContent = 'Mejor precio reciente';
+    }
+    return {price,caption,recentBest};
+}
+function renderNormalProductPrice(row, caption, secondPrice) {
+    const hasPromotion = caption.classList.contains('product-promotion-caption')
+        || secondPrice?.querySelector('.product-promotion-caption');
+    if (!hasPromotion) return null;
+    const options = rankedProductPrices(row, regularProductPrices(row));
+    const best = options[0];
+    if (!best && row.normal_price == null) return null;
+
+    const reference = document.createElement('div');
+    reference.className = 'product-normal-price';
+    const label = document.createElement('div');
+    label.className = 'product-normal-price-label';
+    label.textContent = best ? 'Mejor precio sin promoción' : 'Último sin promoción';
+    const regularPrice = renderProductPrice(row, best || {price: row.normal_price, date: row.normal_date});
+    reference.append(label, regularPrice.price, regularPrice.caption);
+
+    const alternative = alternateProductPrice(options);
+    if (alternative) {
+        const alternativePrice = renderProductPrice(row, alternative);
+        const section = document.createElement('div');
+        section.className = 'product-normal-alternative';
+        section.setAttribute('aria-label', 'Segundo mejor precio sin promoción');
+        section.append(alternativePrice.price, alternativePrice.caption);
+        reference.append(section);
+    }
+    return reference;
+}
+function alternateProductPrice(options) {
+    if (options.length < 2 || !options[0].date) return null;
+    const age = Math.max(0, priceAgeDays(options[0].date));
+    return Number.isFinite(age) && priceFreshness(age) !== 'fresh' ? options[1] : null;
+}
+function renderSecondProductPrice(row) {
+    const alternative = alternateProductPrice(rankedProductPrices(row));
+    if (!alternative) return null;
+    const section=document.createElement('div');section.className='product-second-price';
+    section.setAttribute('aria-label','Segundo mejor precio en otro súper');
+    const {price,caption}=renderProductPrice(row,alternative);
+    section.append(price,caption);return section;
 }
 function shelfPromotion(code) {return {'none':[1n,1n,1n],'offer':[1n,1n,1n],'2x1':[2n,1n,1n],'3x2':[3n,2n,1n],'4x3':[4n,3n,1n],'2_50%':[2n,3n,2n],'2_80%':[2n,6n,5n]}[code || 'none'];}
 function revealProductControls(element) {
@@ -389,7 +639,7 @@ async function openShelfPrice(row) {
     const priceLabel='Precio '+({package:'por envase',kg:'por kg',l:'por litro',unit:'por unidad'}[shelfBasis(row)]);
     $('shelf_price').placeholder=priceLabel;$('shelf_price').setAttribute('aria-label',priceLabel);
     $('shelf_price').value='';$('shelf_date').value=todayLocal();$('shelf_promotion').value='none';$('shelf_promotion').disabled=false;
-    $('shelf_subtract_cent').checked=false;
+    resetPriceCent('shelf_price');
     $('shelf_fractional_fields').hidden=row.sale_mode!=='fractional';
     $('shelf_fractional_fields').dataset.unit=row.content_unit==='g' ? 'g' : 'ml';
     $('shelf_amount_paid').value='';updateShelfFractionalPreview();
@@ -400,6 +650,7 @@ async function openShelfPrice(row) {
 }
 async function closeShelfPrice(restore=true) {
     const draftCancelled=comparisonProductDraft?.row.id===shelfProductId;
+    if (shelfEditingObservation) $('shelf_branch').value=window.mercadoActiveBranch || '';
     shelfProductId=null;shelfEditingObservation=null;$('shelf_price_form').hidden=true;
     if(draftCancelled && restore) {comparisonProductDraft=null;await read_products();openModuleSection('register_section');return;}
     if(restore) {$('search').value='';resetCatalogFilters();await read_products();if(window.productActionReturn)await window.productActionReturn();}
@@ -423,6 +674,7 @@ async function saveShelfPrice() {
             payload.amount_paid=decimalInput($('shelf_amount_paid').value,4,true);
         }
         if(promotion==='special') {const offer=readSpecialOffer('shelf');Object.assign(payload,{special_quantity:Number(offer.units),special_total:decimalText(offer.total/100n,2),promotion_description:offer.description});}
+        else if (promotion !== 'none') payload.promotion_description=$('shelf_special_description').value.trim() || null;
         if(branchId) payload.branch_id=branchId;
         if(shelfEditingObservation) {
             payload.observation_id=shelfEditingObservation.id;
@@ -443,7 +695,7 @@ async function saveShelfPrice() {
             if(navigator.locks) await navigator.locks.request('mercado-local-save',commit);else await commit();
             comparisonProductDraft=null;comparisonShelfDraft=null;setComparisonRegistration(false);
             for(const field of ['product','brand','ptype','psubtype','new_category','new_flavor','new_unit_content','new_total_content','new_barcode','new_package_content']) $(field).value='';
-            await updateStatus();notice('Producto y precio de góndola guardados juntos.');
+            await updateStatus();notice('Producto y precio de góndola guardados juntos.', {success:true});
         } else await queueOperation('shelf_price',payload,null,shelfEditingObservation?.id);
         await closeShelfPrice();void sync_pending();
     } catch(error) {notice('No se guardó: '+error.message+'. Los campos se conservaron.');}
@@ -525,6 +777,7 @@ read_products = async function () {
     const rows = await catalogWithPrices();
     if(comparisonProductDraft && shelfProductId===comparisonProductDraft.row.id) rows.push(comparisonProductDraft.row);
     if(generation!==catalogRenderGeneration) return;
+    document.dispatchEvent(new CustomEvent('mercado-catalog-change',{detail:{rows}}));
     const search = $('search').value.toLowerCase();
     const renderFilter=(id,values,selected,active,callback)=>{
         $(id).replaceChildren();
@@ -605,41 +858,9 @@ read_products = async function () {
         title.textContent = row.product_all;
         button.textContent='Opciones';button.onclick = () => showProductActions(row.id);
         const edit=document.createElement('button');edit.type='button';edit.className='product-cart-button';edit.title='Agregar al carrito';edit.setAttribute('aria-label','Agregar al carrito');edit.innerHTML='<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3h2l2.5 12h11l2-8H6"/><circle cx="9" cy="20" r="1"/><circle cx="18" cy="20" r="1"/></svg>';edit.onclick=()=>useProduct('purchase',row.id);
-        const price=document.createElement('div');price.className='product-last-price';
-        const best=row.best_price;
-        const value=best?.price ?? row.last_price ?? row.normal_price;
-        price.textContent=value==null ? 'Sin precio registrado' : formatProductPrice(value);
-        if(value!=null && row.sale_mode==='fractional') price.textContent+='/'+(row.content_unit==='g' ? 'kg' : 'litro');
-        const unitPrice=value==null || row.sale_mode==='fractional' ? '' : productUnitPrice(row,value);
-        if(unitPrice) {
-            const normalized=document.createElement('span');normalized.className='product-unit-price';
-            const multiPack=row.sale_mode==='package' && row.content_unit==='unit' && Number(row.package_content)>1;
-            if(multiPack) {
-                normalized.classList.add('product-pack-unit-price');
-                normalized.textContent=unitPrice.replace('/unidad',' por unidad');
-            } else normalized.textContent=' ('+unitPrice+')';
-            price.append(normalized);
-        }
-        const caption=document.createElement('div');caption.className='product-price-caption';
-        const date=best?.date || row.last_price_date || row.normal_date;
-        if(value!=null && date) {
-            const age=Math.max(0,priceAgeDays(date));
-            if(Number.isFinite(age)) {
-                price.dataset.freshness=age<=7?'fresh':age<=14?'recent':'old';
-                price.title='Precio registrado hace '+age+' día'+(age===1?'':'s');
-                price.setAttribute('aria-label',formatProductPrice(value)+'. '+price.title);
-            }
-        }
-        caption.textContent='';
-        const market=best ? best.market : row.last_price_market,conditions=best ? best.conditions : row.last_price_conditions;
-        if(market)caption.textContent=market;
-        if(date){const days=Math.max(0,priceAgeDays(date));caption.textContent+=(caption.textContent?' · ':'')+days+(days===1?' día':' días');}
-        if(conditions && conditions!=='none')caption.textContent+=' · '+conditions.replace('offer','Oferta').replace('2_50%','Segunda al 50%').replace('2_80%','Segunda al 80%').replace('special','Promoción especial');
-        const description=best ? best.description : row.last_price_description;
-        if(description)caption.textContent+=' · '+description;
-        else if(best?.promotion && !conditions)caption.textContent+=' · Promoción';
-        if(best ? best.pending : row.last_price_pending) caption.textContent+=' · Pendiente de sincronizar';
-        if(value==null) caption.textContent='';
+        const {price,caption,recentBest}=renderProductPrice(row);
+        const secondPrice=renderSecondProductPrice(row);
+        const normalReference = renderNormalProductPrice(row, caption, secondPrice);
         const actions=document.createElement('div');actions.className='product-row-actions';actions.append(button);
         if(!menuOpen) actions.append(edit);
         if(pricesMode && !menuOpen) {
@@ -658,7 +879,7 @@ read_products = async function () {
             const compare=document.createElement('button');compare.type='button';compare.className='product-compare-related';compare.textContent='{}';compare.setAttribute('aria-label','Comparar precios de productos relacionados');compare.setAttribute('aria-pressed',String(priceComparisonProduct===row.id));
             compare.onclick=()=>{priceComparisonProduct=priceComparisonProduct===row.id ? null : row.id;compare.setAttribute('aria-pressed',String(priceComparisonProduct===row.id));highlightProductFlavors(rows,row.id);centerProductCard(td);};actions.append(compare);
         }
-        td.className='product-card';td.dataset.productId=row.id;
+        td.className='product-card';td.classList.toggle('has-second-price',Boolean(secondPrice));td.dataset.productId=row.id;
         if(historyMode) actions.classList.add('history-hidden-actions');
         if(row.id===editingProduct) {td.classList.add('product-edit-open');actions.hidden=true;}
         if(menuOpen) {td.classList.add('product-menu-open');actions.hidden=true;price.hidden=true;caption.hidden=true;}
@@ -678,9 +899,17 @@ read_products = async function () {
         };
         td.onclick=event=>{if(!event.target.closest('button,input,select,textarea,a,form,.price-history')) toggleActions();};
         td.onkeydown=event=>{if(event.target===td && ['Enter',' '].includes(event.key)) {event.preventDefault();toggleActions();}};
-        td.append(title,price,caption,actions);if(historyMode) td.append(renderPriceHistory(row)); tr.append(td); $('data_table').append(tr);
+        td.append(title,price);
+        if (recentBest) {recentBest.hidden=menuOpen;td.append(recentBest);}
+        td.append(caption);
+        if(secondPrice) {secondPrice.hidden=menuOpen;td.append(secondPrice);}
+        if (normalReference) {normalReference.hidden=menuOpen;td.append(normalReference);}
+        td.append(actions);if(historyMode) td.append(renderPriceHistory(row)); tr.append(td); $('data_table').append(tr);
         if(row.id===actionProductId) td.append($('product_actions'));
-        if(row.id===editingProduct) td.append($('product_editor'));
+        if(row.id===editingProduct) {
+            renderProductEditOfferActions(row);
+            td.append($('product_editor'));
+        }
         if(row.id===shelfProductId) td.append($('shelf_price_form'));
     }
     $('search_add_product').hidden=!search.trim() || Boolean(focusedProduct) || $('data_table').querySelector('.product-card')!==null;
@@ -689,6 +918,15 @@ read_products = async function () {
     highlightProductFlavors(rows,revealedProductId || focusedProduct);
     if (!rows.length) notice('Todavía no hay catálogo local. Conectá una vez con tu PC o cargá un producto nuevo.');
 };
+function createProductFromSearch() {
+    const name = $('search').value.trim();
+    if (name) {
+        const product = $('product');
+        product.value = name.charAt(0).toLocaleUpperCase('es') + name.slice(1);
+        product.dispatchEvent(new Event('input', {bubbles:true}));
+    }
+    showModule('new');
+}
 function catalogDate(row) {
     const value=row.last_price_at || row.last_price_date || row.normal_date || row.created_at;
     return value && Number.isFinite(Date.parse(value)) ? Date.parse(value) : 0;
@@ -720,15 +958,16 @@ function prepareComparison(row) {
     $('compare_product_label').textContent=row.product_all;
     const reference=row.normal_price==null ? 'Sin precio de referencia' : formatProductPrice(row.normal_price);
     $('compare_product_reference').value=row.normal_price ?? '';
+    resetPriceCent('compare_product_reference', row.normal_price != null);
     $('compare_content_unit').value=row.content_unit==='ml' ? 'l' : row.content_unit==='unit' ? 'unit' : 'kg';
     $('new_price').value='';
+    resetPriceCent('new_price');
     $('new_presentation').value='';
     document.querySelectorAll('input[name="promotion"]').forEach(input=>input.checked=false);
     $('compare_promotions_enabled').checked=false;
     $('compare_promotions').hidden=true;
     for(const name of ['quantity','total','description']) $('compare_special_'+name).value='';
     updateSpecialPromotion();
-    $('checkbox_new_price_9_99').checked=false;
     updateComparisonCentCheckbox();
     const unit=row.content_unit==='g' ? 'kg' : row.content_unit==='ml' ? 'litros' : row.content_unit==='unit' ? 'unidades' : null;
     $('new_presentation').dataset.caption='Contenido por envase';
@@ -737,10 +976,31 @@ function prepareComparison(row) {
     $('compare_product_content').value=row.sale_mode==='fractional' ? '1' : row.presentation ?? '';
     updateComparisonFieldCaptions();
 }
+let purchasePriceRow = null;
+function fillBranchPurchasePrice(row, branchId) {
+    const latest = branchId ? rankedProductPrices(row).find(option => option.branch_id === branchId) : null;
+    const lastShelf = branchId && row.shelf_observation?.branch_id === branchId ? row.shelf_observation : null;
+    const observation = latest ? latest.shelf_observation ?? (lastShelf?.id === latest.id ? lastShelf : null) : lastShelf;
+    const promotion = observation?.promotion || (latest && isPromotionalPrice(latest) ? 'offer' : 'none');
+    const special = promotion === 'special';
+    const price = special ? latest?.price : observation?.price ?? latest?.price;
+    $('price').value = price ?? '';
+    $('price').placeholder = 'Ingresá el precio';
+    $('quantity').value = '1';
+    $('checkbox_quantity_1_1000').checked = false;
+    $('purchase_special_quantity').value = special ? observation.special_quantity : '';
+    $('purchase_special_total').value = special ? observation.special_total : '';
+    $('purchase_special_description').value = special ? observation.promotion_description || '' : '';
+    resetPriceCent('price', price != null);
+    setPurchasePromotion(promotion);
+    updatePurchasePromotion(true);
+    updateFractionalPurchasePreview();
+}
 select_product = function (id,all,name,brand,type,subtype,price,unitPrice,presentation) {
     clearComparison();
+    purchasePriceRow = null;
     $('price').value = ''; $('quantity').value = '1';
-    $('checkbox_99').checked = false; $('checkbox_quantity_1_1000').checked = false;
+    resetPriceCent('price');$('checkbox_quantity_1_1000').checked = false;
     setPurchasePromotion('none');updatePurchasePromotion(false);
     selected_id=id; selected_all=all; selected_product=name; selected_brand=brand;
     selected_ptype=type; selected_psubtype=subtype; selected_presentation=presentation;
@@ -749,8 +1009,9 @@ select_product = function (id,all,name,brand,type,subtype,price,unitPrice,presen
     $('purchase_product_label').textContent=all;
     $('price').placeholder=price == null ? 'Ingresá el precio' : 'Referencia: '+formatProductPrice(price);
     another_similar_product(); read_products(); openModuleSection('compare_section');
-    void configureStockSelection(id);
+    const stockSelection = configureStockSelection(id);
     void catalogWithPrices().then(rows=>{const row=rows.find(p=>p.id===id);if(row && selected_id===id) prepareComparison(row);});
+    return stockSelection;
 };
 function identifier() {
     if (!crypto.randomUUID) throw new Error('Abrí Mercado mediante HTTPS para usar el guardado sin conexión');
@@ -813,13 +1074,16 @@ async function recordSameShelfPrice(productId=null) {
         if(value==null) throw new Error('Este producto todavía no tiene un precio registrado');
         const promotion=row.last_price_source==='shelf' ? row.last_price_conditions || 'none' : row.last_price_promotion ? 'offer' : 'none';
         const payload={product_id:id,price:promotion==='special' ? null : decimalInput(row.last_price_source==='shelf' ? row.last_list_price ?? value : value,4),price_basis:shelfBasis(row),promotion,...eventFields()};
-        if(promotion==='special') Object.assign(payload,{special_quantity:Number(row.last_offer_quantity),special_total:row.last_offer_total,promotion_description:row.last_price_description});
+        if (promotion !== 'none') payload.promotion_description=row.last_price_description;
+        if(promotion==='special') Object.assign(payload,{special_quantity:Number(row.last_offer_quantity),special_total:row.last_offer_total});
         const state=await shoppingState();
         const branch=state.branches.find(b=>b.id===$('shelf_branch').value);
         if(!branch) {
             await closeProductActions(false);await openShelfPrice(row);
             $('shelf_price').value=payload.price || '';$('shelf_promotion').value=promotion;
-            if(promotion==='special') {$('shelf_special_quantity').value=payload.special_quantity;$('shelf_special_total').value=payload.special_total;$('shelf_special_description').value=payload.promotion_description || '';}
+            resetPriceCent('shelf_price', true);
+            if(promotion==='special') {$('shelf_special_quantity').value=payload.special_quantity;$('shelf_special_total').value=payload.special_total;}
+            $('shelf_special_description').value=payload.promotion_description || '';
             updateSpecialPromotion();
             notice('El precio ya está cargado. Elegí el local y guardá la observación.');
             return;
@@ -827,7 +1091,7 @@ async function recordSameShelfPrice(productId=null) {
         Object.assign(payload,{branch_id:branch.id,market:(branch.name+' · '+(branch.address || 'Local sin confirmar')).slice(0,255)});
         await queueOperation('shelf_price',payload);
         if(productId) await read_products();else await closeProductActions();
-        notice('Nueva observación guardada con el mismo precio y fecha de hoy: '+payload.market+'.');
+        notice('Nueva observación guardada con el mismo precio y fecha de hoy: '+payload.market+'.', {success:true});
         void sync_pending();
     } catch(error) {notice('No se guardó: '+error.message);}
     finally {saving=false;}
@@ -839,10 +1103,15 @@ async function useProduct(action,productId=null) {
     if(action==='edit') {await editProduct(id);return;}
     if(action==='shelf') {await openShelfPrice(row);return;}
     if(['add','remove'].includes(action) && row.unit_status!=='confirmed') {await editProduct(id);notice('Confirmá la modalidad, unidad y contenido para gestionar el stock.');return;}
-    select_product(row.id,row.product_all,row.product_name,row.product_brand,row.product_ptype,row.product_psubtype,row.normal_price,row.normal_unit,row.presentation);
-    await configureStockSelection(id);
+    await select_product(row.id,row.product_all,row.product_name,row.product_brand,row.product_ptype,row.product_psubtype,row.normal_price,row.normal_unit,row.presentation);
     if(action==='compare') {prepareComparison(row);openModuleSection('compare_section');return;}
-    if(action==='purchase') {openModuleSection('instances_section');return;}
+    if(action==='purchase') {
+        if (selected_id !== id) return;
+        purchasePriceRow = row;
+        fillBranchPurchasePrice(row, $('purchase_branch').value);
+        openModuleSection('instances_section');
+        return;
+    }
     stockMovementProduct=action==='remove' ? id : null;await renderStock();openModuleSection('stock_section');
     if(action==='add') {$('initial_quantity').focus();return;}
     $('movement_reason').value='consume';$('movement_quantity').value='';$('movement_lot').focus();
@@ -873,9 +1142,9 @@ function toggleMultipleProducts() {
     const enabled=$('new_product_form').classList.toggle('multiple-products');
     $('multiple_products_toggle').setAttribute('aria-pressed',String(enabled));
 }
-function arrangeEditorFields(form=$('product_editor').querySelector('form')) {
+function arrangeEditorFields(form) {
     form.setAttribute('autocomplete','off');
-    for(const label of [...form.querySelectorAll('label:not(.editor-field)')]) {
+    for(const label of [...form.querySelectorAll('label:not(.editor-field, .shelf-cent-option)')]) {
         const control=label.querySelector('input,select'),title=[...label.childNodes].filter(node=>node.nodeType===3).map(node=>node.textContent).join('').trim();
         const row=document.createElement('div');row.className='editor-field-row';
         control.addEventListener('focus',()=>row.classList.add('field-writing'));
@@ -934,7 +1203,7 @@ function arrangeEditorFields(form=$('product_editor').querySelector('form')) {
         }
     }
     for(const control of form.querySelectorAll('.editor-field input,.editor-field select')) control.editorCaptionUpdate();
-    setupPackContents(form.id==='new_product_form' ? 'new_' : form.closest('#product_editor') ? 'stock_' : null);
+    setupPackContents(form.id==='new_product_form' ? 'new_' : null);
 }
 function recalculatePackContents(prefix,strict=false) {
     const each=$(prefix+'unit_content'),total=$(prefix+'total_content');
@@ -962,27 +1231,165 @@ function setupPackContents(prefix) {
 function updateProductEditorFields() {
     const mode=$('stock_sale_mode').value;
     const byUnit=mode==='unit';
+    const multipack=mode==='multipack';
+    const fractional=mode==='fractional';
     for(const id of ['stock_unit_content','stock_total_content','stock_unit_content_unit']) $(id).closest('.editor-field-row').hidden=mode!=='multipack';
     $('stock_total_content').closest('.pack-content-pair').hidden=mode!=='multipack';
-    for(const id of ['stock_content_unit','stock_package_content']) {
-        const control=$(id);
-        (control.closest('.editor-field-row') || control.closest('label')).hidden=byUnit;
-    }
+    $('stock_content_unit').closest('label').hidden=byUnit || multipack;
+    $('stock_package_content').closest('label').hidden=byUnit || fractional;
+    $('stock_package_content_label').textContent=multipack ? 'Unidades por paquete' : 'Contenido por envase';
     const unit=$('stock_content_unit');
-    if(byUnit || mode==='multipack') {
+    if(byUnit || multipack) {
         if(unit.value!=='unit') unit.dataset.previousUnit=unit.value;
         unit.value='unit';
     } else if(unit.dataset.previousUnit) {
         unit.value=unit.dataset.previousUnit;
         delete unit.dataset.previousUnit;
     }
-    unit.editorCaptionUpdate?.();
+    if (fractional && unit.value === 'unit') unit.value='g';
+    for (const option of unit.options) option.disabled=fractional && option.value==='unit';
 }
+setupPackContents('stock_');
 $('stock_sale_mode').addEventListener('change',updateProductEditorFields);
+
+let productEditCatalog = [];
+const productEditLabelFields = {
+    edit_name: 'product_name', edit_brand: 'product_brand', edit_category: 'product_class',
+    edit_type: 'product_ptype', edit_subtype: 'product_psubtype', edit_flavor: 'flavor',
+    edit_storage_location: 'location', edit_storage_detail: 'detail'
+};
+function productEditLabelOptions(field, query, current) {
+    let rows = productEditCatalog;
+    if (field === 'location' || field === 'detail') {
+        rows = rows.flatMap(productStorageLocations);
+        const room = catalogLabelKey($('edit_storage_location').value, '');
+        if (field === 'detail' && room) rows = rows.filter(place => catalogLabelKey(place.location, '') === room);
+    }
+    const match = catalogLabelKey(query, field);
+    const selected = catalogLabelKey(current, field);
+    const unique = new Map();
+    for (const row of rows) {
+        const label = String(row[field] || '').trim();
+        const key = catalogLabelKey(label, field);
+        if (key && key.includes(match) && !unique.has(key)) unique.set(key, label);
+    }
+    const priority = key => key === selected ? 0 : key.startsWith(match) ? 1 : 2;
+    return [...unique].sort(([a, labelA], [b, labelB]) => priority(a) - priority(b) || labelA.localeCompare(labelB, 'es'))
+        .map(([, label]) => label);
+}
+function addProductEditSuggestions(input, field) {
+    const label = input.closest('label');
+    const wrapper = document.createElement('div');
+    wrapper.className = 'product-edit-suggest-field';
+    wrapper.classList.toggle('product-edit-wide', label.classList.contains('product-edit-wide'));
+    const suggestions = document.createElement('div');
+    suggestions.id = input.id + '_suggestions';
+    suggestions.className = 'product-edit-suggestions';
+    suggestions.setAttribute('role', 'listbox');
+    suggestions.setAttribute('aria-label', 'Etiquetas existentes de ' + label.textContent.trim());
+    suggestions.hidden = true;
+    label.before(wrapper);
+    wrapper.append(label, suggestions);
+
+    input.setAttribute('role', 'combobox');
+    input.setAttribute('aria-autocomplete', 'list');
+    input.setAttribute('aria-controls', suggestions.id);
+    input.setAttribute('aria-expanded', 'false');
+    input.autocomplete = 'off';
+    let active = -1;
+    let query = '';
+    function close() {
+        suggestions.hidden = true;
+        input.setAttribute('aria-expanded', 'false');
+        input.removeAttribute('aria-activedescendant');
+        active = -1;
+    }
+    function show(value) {
+        close();
+        if (input.disabled) return;
+        query = value;
+        const values = productEditLabelOptions(field, query, input.value);
+        suggestions.replaceChildren(...values.map((value, index) => {
+            const option = document.createElement('button');
+            option.type = 'button';
+            option.id = suggestions.id + '_' + index;
+            option.tabIndex = -1;
+            option.setAttribute('role', 'option');
+            option.setAttribute('aria-selected', 'false');
+            option.textContent = value;
+            option.addEventListener('pointerdown', event => event.preventDefault());
+            option.onclick = () => {
+                input.value = value;
+                query = '';
+                close();
+            };
+            return option;
+        }));
+        suggestions.hidden = !values.length;
+        input.setAttribute('aria-expanded', String(!suggestions.hidden));
+        suggestions.scrollTop = 0;
+    }
+    input.addEventListener('focus', () => show(''));
+    input.addEventListener('click', () => {if (suggestions.hidden) show(query);});
+    input.addEventListener('input', () => show(input.value));
+    input.addEventListener('blur', close);
+    input.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && !suggestions.hidden) {
+            event.preventDefault();
+            close();
+        } else if (event.key === 'Enter' && active >= 0) {
+            event.preventDefault();
+            suggestions.children[active].click();
+        } else if (!suggestions.hidden && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+            const count = suggestions.children.length;
+            event.preventDefault();
+            if (active >= 0) suggestions.children[active].setAttribute('aria-selected', 'false');
+            active = event.key === 'ArrowDown' ? (active + 1) % count : (active <= 0 ? count - 1 : active - 1);
+            const option = suggestions.children[active];
+            option.setAttribute('aria-selected', 'true');
+            input.setAttribute('aria-activedescendant', option.id);
+            option.scrollIntoView({block:'nearest', behavior:'instant'});
+        }
+    });
+    return close;
+}
+const productEditSuggestionClosers = Object.entries(productEditLabelFields).map(([id, field]) => addProductEditSuggestions($(id), field));
+
+const productEditTabs = [...$('product_edit_tabs').querySelectorAll('[role="tab"]')];
+function selectProductEditTab(selected) {
+    productEditSuggestionClosers.forEach(close => close());
+    for (const tab of productEditTabs) {
+        const active = tab === selected;
+        tab.setAttribute('aria-selected', String(active));
+        tab.tabIndex = active ? 0 : -1;
+        $(tab.getAttribute('aria-controls')).hidden = !active;
+    }
+}
+for (const tab of productEditTabs) tab.addEventListener('click', () => selectProductEditTab(tab));
+$('product_edit_tabs').addEventListener('keydown', event => {
+    const index = productEditTabs.indexOf(event.target);
+    const count = productEditTabs.length;
+    let next;
+    if (event.key === 'ArrowRight') next = (index + 1) % count;
+    else if (event.key === 'ArrowLeft') next = (index - 1 + count) % count;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = count - 1;
+    else return;
+    event.preventDefault();
+    selectProductEditTab(productEditTabs[next]);
+    productEditTabs[next].focus();
+});
+$('product_edit_form').addEventListener('submit', event => {
+    event.preventDefault();
+    void saveProductEdit();
+});
+
 async function editProduct(id) {
     window.mapProductEditorReturn=null;const mapReturn=document.getElementById('map_product_editor_return');if(mapReturn)mapReturn.hidden=true;
     $('delete_product_confirmation').hidden=true;
-    const row=(await localRead('catalog')).find(p=>p.id===id);if(!row) return;
+    const catalog = await localRead('catalog');
+    const row=catalog.find(p=>p.id===id);if(!row) return;
+    productEditCatalog = catalog;
     editingProduct=id;editingRevision=row.revision || 1;
     await closeShelfPrice(false);
     await closeProductActions(false);
@@ -998,40 +1405,70 @@ async function editProduct(id) {
     $('stock_unit_content_unit').value=row.unit_content_unit || 'g';
     const hasLots=(await projectedStock()).lots.some(l=>l.product_id===id);
     for(const field of ['stock_sale_mode','stock_content_unit','stock_package_content']) $(field).disabled=hasLots;
+    $('product_edit_units_locked').hidden=!hasLots;
     for(const [field,value] of [['name',row.product_name],['brand',row.product_brand],['type',row.product_ptype],['subtype',row.product_psubtype],['category',row.product_class],['flavor',row.flavor],['storage_location',row.storage_location],['storage_detail',row.storage_detail]]) $('edit_'+field).value=value || '';
     $('edit_stock_pattern').value=row.stock_pattern || 'stable';
-    arrangeEditorFields();
+    $('product_edit_heading').textContent=row.product_name;
+    const summary=$('product_edit_summary');
+    summary.textContent=productLabel({...row,product_name:'',product_ptype:'',product_psubtype:'',flavor:''});
+    summary.hidden=!summary.textContent;
+    $('product_edit_actions').open=false;
+    $('product_edit_details').open=false;
+    selectProductEditTab($('product_edit_tab_data'));
     updateStockPatternFields();
     updateProductEditorFields();
     $('product_editor').hidden=false;await read_products();showModule('products',{scroll:false});
+    $('product_edit_heading').focus({preventScroll:true});
     revealProductControls($('product_editor'));
 }
-async function editShelfObservation() {
+function renderProductEditOfferActions(row) {
+    const actions = $('product_edit_actions').querySelector('.product-edit-secondary-actions');
+    actions.querySelectorAll('[data-offer-edit]').forEach(button => button.remove());
+    const seen = new Set([row.shelf_observation?.id]);
+    const alternative = alternateProductPrice(rankedProductPrices(row));
+    for (const option of [row.best_price, alternative]) {
+        if (option?.source !== 'shelf' || !isPromotionalPrice(option)) continue;
+        const observation = option.shelf_observation;
+        if (!observation || seen.has(observation.id)) continue;
+        seen.add(observation.id);
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.offerEdit = '';
+        button.textContent = option.market ? 'Corregir oferta en ' + option.market : 'Corregir oferta de ' + formatProductPrice(option.price);
+        button.onclick = () => void editShelfObservation(row.id, observation.id);
+        actions.append(button);
+    }
+}
+async function editShelfObservation(productId=editingProduct, observationId=null) {
     try {
-        const row=(await catalogWithPrices()).find(p=>p.id===editingProduct);
-        const observation=row?.shelf_observation;
-        if(!observation) throw new Error('Este producto todavía no tiene observaciones de góndola');
+        const row=(await catalogWithPrices()).find(p=>p.id===productId);
+        const latest=row?.shelf_observation;
+        const observation=observationId && latest?.id!==observationId
+            ? row?.price_options?.find(option=>option.id===observationId)?.shelf_observation
+            : latest;
+        if(!observation) throw new Error(observationId ? 'La oferta cambió. Volvé a abrir el editor.' : 'Este producto todavía no tiene observaciones de góndola');
         if((await localRead('outbox')).some(op=>op.kind==='shelf_price' && op.payload.observation_id===observation.id)) throw new Error('Esta observación ya tiene una corrección pendiente. Sincronizala o corregila desde el menú de sincronización');
         await openShelfPrice(row);shelfEditingObservation=observation;
-        $('shelf_price_form').querySelector('h2').textContent='Editar precio de góndola';
+        $('shelf_price_form').querySelector('h2').textContent=observation.promotion==='none' ? 'Editar precio de góndola' : 'Corregir oferta';
         $('shelf_price_form').querySelector('button[onclick="saveShelfPrice()"]').textContent='Guardar corrección';
         $('shelf_price').value=observation.price || '';$('shelf_promotion').value=observation.promotion;
+        resetPriceCent('shelf_price', true);
         $('shelf_amount_paid').value=observation.amount_paid || '';updateShelfFractionalPreview();
         $('shelf_date').value=new Date(observation.occurred_at).toLocaleDateString('sv-SE',{timeZone:observation.event_timezone});
         $('shelf_special_quantity').value=observation.special_quantity || '';$('shelf_special_total').value=observation.special_total || '';$('shelf_special_description').value=observation.promotion_description || '';
         $('shelf_branch').value=observation.branch_id || '';await renderShelfLocals();updateSpecialPromotion();
+        if (observation.promotion === 'special') $('shelf_special_quantity').focus({preventScroll:true});
     } catch(error) {notice(error.message);}
 }
 function showDeleteProductConfirmation() {
-    $('delete_product_status').hidden=true;$('delete_product_status').textContent='';
+    $('product_edit_actions').open=true;
     $('delete_with_stock_confirmation').hidden=true;
     $('delete_product_confirmation').hidden=false;
     $('delete_product_confirmation').scrollIntoView({behavior:'smooth',block:'center'});
 }
 async function deleteEditedProduct(clearStock=false) {
-    const status=$('delete_product_status');
-    if(saving || !editingProduct) {status.hidden=false;status.textContent=saving?'Esperá a que termine el guardado actual y volvé a confirmar.':'Volvé a abrir la edición del producto.';return;}
-    const confirm=$('delete_product_confirmation').querySelector('button[onclick="deleteEditedProduct()"]');confirm.disabled=true;status.hidden=false;status.textContent='Borrando…';
+    if(saving || !editingProduct) {notice(saving?'Esperá a que termine el guardado actual y volvé a confirmar.':'Volvé a abrir la edición del producto.');return;}
+    const confirm=$('delete_product_confirmation').querySelector('button[onclick="deleteEditedProduct()"]');confirm.disabled=true;
     const force=$('delete_with_stock_confirmation').querySelector('button');force.disabled=true;
     saving=true;
     try {
@@ -1047,9 +1484,13 @@ async function deleteEditedProduct(clearStock=false) {
         };
         if(navigator.locks) await navigator.locks.request('mercado-local-save',action);else await action();
         await closeProductEditor();await renderStock();await renderShopping();
-        notice('Producto borrado del catálogo. Su historial se conserva.');
+        notice('Producto borrado del catálogo. Su historial se conserva.', {success:true});
         void sync_pending();
-    } catch(error) {status.textContent='No se borró: '+error.message;notice(status.textContent);status.scrollIntoView({behavior:'smooth',block:'center'});}
+    } catch(error) {
+        notice('No se borró: '+error.message);
+        const confirmation=$('delete_with_stock_confirmation');
+        if(!confirmation.hidden) confirmation.scrollIntoView({behavior:'smooth',block:'center'});
+    }
     finally {saving=false;confirm.disabled=false;force.disabled=false;}
 }
 async function queueZeroStockAndDelete(row,stock) {
@@ -1073,6 +1514,8 @@ async function queueZeroStockAndDelete(row,stock) {
 async function closeProductEditor(restore=true) {
     const id=editingProduct;
     editingProduct=null;editingRevision=null;$('product_editor').hidden=true;
+    productEditSuggestionClosers.forEach(close => close());
+    productEditCatalog = [];
     const mapReturn=window.mapProductEditorReturn;window.mapProductEditorReturn=null;const returnButton=document.getElementById('map_product_editor_return');if(returnButton)returnButton.hidden=true;
     if(restore&&mapReturn){await mapReturn();return;}
     if(restore) {
@@ -1083,6 +1526,8 @@ async function closeProductEditor(restore=true) {
 }
 async function saveProductEdit() {
     if(saving || !editingProduct) return;saving=true;
+    $('save_product_edit').disabled=true;
+    $('cancel_product_edit').disabled=true;
     try {
         const action=async()=>{
             const row=(await localRead('catalog')).find(p=>p.id===editingProduct);
@@ -1090,9 +1535,16 @@ async function saveProductEdit() {
             const payload={product_id:row.id,expected_revision:editingRevision,display_label:null,product:$('edit_name').value.trim(),brand:$('edit_brand').value.trim(),ptype:$('edit_type').value.trim() || null,psubtype:$('edit_subtype').value.trim() || null,category:$('edit_category').value.trim() || null,flavor:$('edit_flavor').value.trim(),storage_detail:$('edit_storage_detail').value.trim(),storage_location:$('edit_storage_location').value.trim()};
             payload.stock_pattern=$('edit_stock_pattern').value;
             if(payload.stock_pattern==='irregular') Object.assign(payload,{storage_location:'',storage_detail:'',storage_locations:[]});
-            if(!payload.product) throw new Error('Ingresá el nombre del producto');
+            if(!payload.product) {
+                selectProductEditTab($('product_edit_tab_data'));
+                $('edit_name').focus();
+                throw new Error('Ingresá el nombre del producto');
+            }
             if(Object.values(payload).some(v=>typeof v==='string' && v.length>255)) throw new Error('Los textos admiten hasta 255 caracteres');
-            if($('stock_sale_mode').value) Object.assign(payload,productSpecification('stock_'));
+            if($('stock_sale_mode').value) {
+                try {Object.assign(payload,productSpecification('stock_'));}
+                catch(error) {selectProductEditTab($('product_edit_tab_presentation'));throw error;}
+            }
             const lots=(await projectedStock()).lots;
             if(payload.sale_mode && lots.some(l=>l.product_id===row.id) && (row.sale_mode!==payload.sale_mode || row.content_unit!==payload.content_unit || scaledDecimal(row.package_content,6)!==scaledDecimal(payload.package_content,6))) throw new Error('Este producto tiene stock: creá otra presentación para cambiar su contenido');
             const updated={...row,stock_pattern:payload.stock_pattern,storage_locations:payload.stock_pattern==='irregular' ? [] : row.storage_locations,flavor:payload.flavor,storage_detail:payload.storage_detail,storage_location:payload.storage_location,unit_content:payload.unit_content,unit_content_unit:payload.unit_content_unit,revision:editingRevision+1,product_name:payload.product,product_brand:payload.brand,product_ptype:payload.ptype,product_psubtype:payload.psubtype,product_class:payload.category,product_all:[payload.product,payload.brand,payload.ptype,payload.psubtype].filter(Boolean).join(', ')};
@@ -1107,8 +1559,14 @@ async function saveProductEdit() {
         };
         if(navigator.locks) await navigator.locks.request('mercado-local-save',action);else await action();
         await closeProductEditor();await renderStock();await renderShopping();void sync_pending();
-    } catch(error) {notice('No se guardó: '+error.message+'. Los campos se conservaron.');}
-    finally {saving=false;}
+    } catch(error) {
+        if ($('product_editor').hidden) notice('Producto guardado. No se pudo actualizar la vista: '+error.message);
+        else notice('No se guardó: '+error.message+'. Los campos se conservaron.');
+    } finally {
+        saving=false;
+        $('save_product_edit').disabled=false;
+        $('cancel_product_edit').disabled=false;
+    }
 }
 let similarProductBaseline=null;
 function productIdentity(product) {
@@ -1176,7 +1634,7 @@ async function queueOperationUnlocked(kind,payload,row=null,entityId=null) {
     const effect=await stockEffect(op);
     const shopping=await shoppingEffect(op);
     await localTransaction(['catalog','outbox','stock_effects','shopping_effects'],tx => { tx.objectStore('outbox').add(op); if (row) tx.objectStore('catalog').put(row); if (effect) tx.objectStore('stock_effects').put({id:op.operation_id,...effect}); if (shopping) tx.objectStore('shopping_effects').put({id:op.operation_id,...shopping}); });
-    await updateStatus(); notice('Guardado en este teléfono. Se sincronizará cuando tu PC esté disponible.'); return op;
+    await updateStatus(); notice('Guardado en este teléfono. Se sincronizará cuando tu PC esté disponible.', {success:true}); return op;
 }
 save_product_form = async function (addShelf=false) {
     if (saving || !db) return; saving=true;
@@ -1195,8 +1653,9 @@ save_product_form = async function (addShelf=false) {
         Object.assign(payload,productSpecification('new_'));
         if(similarProductBaseline && productIdentity(payload)===similarProductBaseline)throw Error('Cambiá alguna característica antes de crear un producto similar');
         await assertNewProductUnique(payload);
-        const fractionalPurchase=payload.sale_mode==='fractional' && !addShelf ? fractionalPurchaseValues($('new_fractional_price').value,$('new_fractional_total').value) : null;
-        const fractionalShelfPrice=payload.sale_mode==='fractional' && addShelf ? adjustedPrice($('new_fractional_price').value,false) : null;
+        const subtractCent = $('new_fractional_subtract_cent').checked;
+        const fractionalPurchase=payload.sale_mode==='fractional' && !addShelf ? fractionalPurchaseValues($('new_fractional_price').value,$('new_fractional_total').value,subtractCent) : null;
+        const fractionalShelfPrice=payload.sale_mode==='fractional' && addShelf ? adjustedPrice($('new_fractional_price').value,subtractCent) : null;
         if (payload.sale_mode==='package') payload.presentation=decimalText(scaledDecimal(payload.package_content,6)/(payload.content_unit==='unit' ? 1n : 1000n),6);
         presentation=payload.presentation;
         if (Object.values(payload).some(value => typeof value === 'string' && value.length > 255)) throw new Error('Los textos admiten hasta 255 caracteres');
@@ -1227,7 +1686,12 @@ save_product_form = async function (addShelf=false) {
         if(addShelf) {
             selected_product_filter=row.product_name;selected_brand_filter=row.product_brand || null;product_filter_active=true;
             await openShelfPrice(row);
-            if(fractionalShelfPrice) {$('shelf_price').value=fractionalShelfPrice;$('shelf_amount_paid').value=$('new_fractional_total').value;updateShelfFractionalPreview();}
+            if(fractionalShelfPrice) {
+                $('shelf_price').value=fractionalShelfPrice;
+                resetPriceCent('shelf_price', true);
+                $('shelf_amount_paid').value=$('new_fractional_total').value;
+                updateShelfFractionalPreview();
+            }
             if(comparisonShelfDraft) {fillComparisonShelf(comparisonShelfDraft);comparisonShelfDraft=null;}
             notice('Producto guardado. Completá su precio de góndola.');
         } else if(fractionalPurchase) {
@@ -1235,15 +1699,21 @@ save_product_form = async function (addShelf=false) {
             if(branch) {
                 await addCartItem({product_id:row.id,...fractionalPurchase,is_promotion:false,market:(branch.name+' · '+(branch.address || 'Local sin confirmar')).slice(0,255),branch_id:branch.id,...eventFields(),add_to_stock:true,stock_quantity:decimalText(scaledDecimal(fractionalPurchase.quantity,6)*1000n,6),stock_unit:row.content_unit,product_revision:1,location:row.stock_pattern==='irregular' ? 'Sin ubicación' : stockPlaceLabel(productStorageLocations(row)[0]) || 'Despensa',expires_on:null,expiry_source:'exact'});
                 await read_products();await renderStock();await renderShopping();openModuleSection('search_section');
-                notice('Producto guardado y agregado al carrito. Confirmá la compra al pasar por caja.');
+                notice('Producto guardado y agregado al carrito. Confirmá la compra al pasar por caja.', {success:true});
             } else {
                 select_product(row.id,row.product_all,row.product_name,row.product_brand,row.product_ptype,row.product_psubtype,null,null,row.presentation);
-                await configureStockSelection(row.id);$('price').value=fractionalPurchase.price;$('purchase_total').value=fractionalPurchase.total_paid;$('quantity').value=fractionalPurchase.quantity;updateFractionalPurchasePreview();openModuleSection('instances_section');
+                await configureStockSelection(row.id);
+                $('price').value=fractionalPurchase.price;
+                resetPriceCent('price', true);
+                $('purchase_total').value=fractionalPurchase.total_paid;
+                $('quantity').value=fractionalPurchase.quantity;
+                updateFractionalPurchasePreview();openModuleSection('instances_section');
                 notice('Producto guardado. Elegí el local y guardá la compra; precio, importe y cantidad ya están cargados.');
             }
         } else openModuleSection('search_section');
         comparisonShelfDraft=null;
         $('new_fractional_price').value='';$('new_fractional_total').value='';
+        resetPriceCent('new_fractional_price');
         void sync_pending();
     } catch (error) { notice('No se guardó: '+error.message+'. Los campos se conservaron.'); }
     finally { saving=false; }
@@ -1251,14 +1721,17 @@ save_product_form = async function (addShelf=false) {
 save_instance_form = async function () {
     if (saving || !db) return; saving=true;
     try {
-        const product=(await localRead('catalog')).find(row => row.id === $('product_id').value);
+        const productId = $('product_id').value, branchId = $('purchase_branch').value;
+        const product=(await localRead('catalog')).find(row => row.id === productId);
         if (!product) throw new Error('Seleccioná un producto del catálogo');
+        const branch=(await shoppingState()).branches.find(b=>b.id===branchId);
+        if(!branch) throw new Error('Elegí un local registrado');
+        if ($('product_id').value !== productId || $('purchase_branch').value !== branchId) throw new Error('Cambió el producto o el local. Revisá el precio y volvé a intentarlo');
+        if (purchasePromotionCode() !== 'special' && !$('price').value && !$('purchase_total').value) throw new Error('Ingresá el precio para este local');
         const values=purchaseAmounts(product);
         const {price,quantity,total_paid}=values;
         const quantityValue=scaledDecimal(quantity,6,true);
         decimalInput(total_paid,4);
-        const branch=(await shoppingState()).branches.find(b=>b.id===$('purchase_branch').value);
-        if(!branch) throw new Error('Elegí un local registrado');
         const market=(branch.name+' · '+(branch.address || 'Local sin confirmar')).slice(0,255);
         if (market.length > 255) throw new Error('El comercio admite hasta 255 caracteres');
         const payload={product_id:product.id,...values,market,occurred_at:new Date().toISOString(),event_timezone:Intl.DateTimeFormat().resolvedOptions().timeZone};
@@ -1270,7 +1743,7 @@ save_instance_form = async function () {
             Object.assign(payload,{add_to_stock:true,stock_quantity,stock_unit:product.content_unit,product_revision:product.revision,location:product.stock_pattern==='irregular' ? 'Sin ubicación' : stockPlaceLabel(productStorageLocations(product)[0]) || 'Despensa',expires_on:null,expiry_source:'exact'});
         }
         await addCartItem(payload);
-        reset_form();notice('Producto agregado al carrito. Todavía no se registró la compra.');if(window.productActionReturn)await window.productActionReturn();
+        reset_form();notice('Producto agregado al carrito. Todavía no se registró la compra.', {success:true});if(window.productActionReturn)await window.productActionReturn();
     } catch (error) { notice('No se guardó: '+error.message+'. Los campos se conservaron.'); }
     finally { saving=false; }
 };
@@ -1311,6 +1784,7 @@ function setComparisonRegistration(active) {
 }
 function fillComparisonShelf(draft) {
     $('shelf_price').value=draft.price;
+    resetPriceCent('shelf_price', true);
     $('shelf_subtract_cent').checked=draft.subtractCent;
     $('shelf_promotion').value=draft.promotion;
     if(draft.special) {

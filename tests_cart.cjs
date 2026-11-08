@@ -90,6 +90,15 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
  const shuffled=[kitchenProducts[5],kitchenProducts[2],kitchenProducts[4],kitchenProducts[0],kitchenProducts[3],kitchenProducts[1]];
  const reviewEntries=stockReviewEntries(shuffled,{lots:[]});
  if(reviewEntries.map(e=>e.productId).join(',')!==kitchenProducts.map(p=>p.id).join(',')) throw Error('Revisión fuera de orden A-F');
+ stockReviewState={room:'Cocina',entries:reviewEntries,index:0,drafts:{}};
+ renderStockReviewLayout();
+ if($('stock_review_layout').hidden || $('stock_review_layout').querySelectorAll('.kitchen-layout button').length!==6) throw Error('Revisión sin croquis de cocina');
+ if($('stock_review_layout').querySelector('button[aria-pressed="true"]')?.dataset.sector!=='A') throw Error('Croquis de revisión sin sector actual');
+ await $('stock_review_layout').querySelector('button[data-sector="D"]').onclick();
+ if(stockReviewState.index!==3 || $('stock_review_layout').querySelector('button[aria-pressed="true"]')?.dataset.sector!=='D') throw Error('Croquis de revisión no navega al sector');
+ stockReviewState={room:'Despensa',entries:[],index:0,drafts:{}};renderStockReviewLayout();
+ if(!$('stock_review_layout').hidden || $('stock_review_layout').children.length) throw Error('Croquis anterior visible en habitación sin diagrama');
+ stockReviewState=null;
  const fridge=document.createElement('div');fridge.className='kitchen-filters';let chosen='';
  const addFridge=(parent,text,active,action)=>{const button=document.createElement('button');button.textContent=text;button.onclick=action;parent.append(button);return button;};
  renderKitchenLayout(fridge,['Congelador','Heladera'],addFridge,()=>{}, {layout:stockRoomLayout('Heladera'),selected:'Congelador',onSelect:value=>chosen=value});
@@ -134,8 +143,10 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
  await page.reload();await page.waitForFunction(()=>db && !syncing);
  assert.equal(await page.evaluate(()=>pricesMode),false);
  assert.equal(await page.evaluate(async()=>(await localRead('cart')).length),1);
- await page.locator('#tab-cart').click();assert.equal(await page.locator('#cart_confirm').isVisible(),true);
+ await page.locator('#section_menu_toggle').click();await page.locator('#tab-cart').click();assert.equal(await page.locator('#cart_confirm').isVisible(),true);
  assert.equal(await page.locator('#cart_items input').count(),0);
+ assert.equal(await page.locator('#cart_items .cart-counter').isVisible(),false);
+ await page.locator('#cart_items summary').click();
  await page.getByRole('button',{name:'Sumar unidades',exact:true}).click();
  await page.waitForFunction(()=>!saving);
  await page.getByRole('button',{name:'Restar unidades',exact:true}).click();await page.waitForFunction(()=>!saving);

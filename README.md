@@ -49,7 +49,21 @@ En la compra se puede ingresar solo cantidad e importe total; el precio medio se
 
 El catálogo nuevo muestra fecha y antigüedad del último precio normal, con desempate por ID. Las vistas históricas de MySQL siguen disponibles y no se modificaron en este bloque. El modelo nuevo usa DECIMAL; las copias de compatibilidad conservan FLOAT, por lo que los importes exactos se consultan en purchase_lines.
 
+## Recorrido automático de precios
+
+En **Recorrer**, activar el switch **Recorrido automático** y elegir los puntos con Inicio y Final, tocando espacio libre del mapa. Recorrer activa Precios y agrupa los específicos disponibles por cuadrado, manteniendo su orden interno. Visita el siguiente acceso más cercano por un camino transitable y termina en el punto elegido. Las distancias se expresan en pasos de grilla; es una aproximación que no garantiza el mínimo global.
+
+Cada parada muestra sus productos y las acciones Mismo precio / Distinto precio. La tarjeta del mapa muestra la parada actual, el avance y los totales. **Reiniciar** vuelve a la selección de puntos sin apagar el switch: conserva Inicio y Final, limpia las marcas de revisión de los productos de esa ruta y conserva los precios ya guardados. **Cuadrado revisado** marca sus productos como revisados y avanza; Parada anterior permite volver. Al terminar se muestra el camino al final. Los productos sin cuadrado o sin acceso aparecen como pendientes, sin contarlos como revisados. Si cambian el mapa, catálogo o disponibilidad se debe recalcular. Desactivar el switch recupera la consulta manual y el tono habitual del menú; al volver a activarlo se puede calcular otra ruta con los puntos elegidos. La ruta activa se conserva al volver de los formularios durante la sesión; recargar la página requiere calcular de nuevo.
+
+`node tests_price_route.cjs` y `node tests_price_route_ui.cjs` verifican el cálculo y el flujo de teléfono/escritorio.
+
 ## Verificación
+
+En **Mapa → Dibujar → Límites y accesos**, tocar un borde permite bloquear/abrir el paso con una pared roja o habilitar/quitar el acceso a productos de una celda de góndola. Azul punteado indica acceso habilitado y ocre punteado, deshabilitado. Sin configuración explícita se permiten los lados junto a espacio libre. Las paredes bloquean ambos sentidos y prevalecen sobre los accesos; las celdas de góndola no se atraviesan. La casilla permite copiar los lados a toda la zona; Restaurar acceso automático elimina la configuración explícita.
+
+**Probar camino y acceso** toma primero un espacio libre como inicio y luego una góndola o destino. Muestra el camino más corto en pasos de grilla, respetando paredes y lados de acceso; no expresa metros ni reordena el recorrido completo de compras. Para un nuevo inicio, cambiar de herramienta y volver. También se puede usar el teclado: flechas, selector de lado y espacio. Los cambios admiten Deshacer, exportación y sincronización, y conservan su posición al modificar las dimensiones o precisión del mapa. Reiniciar el servidor después de actualizar para habilitar el guardado de límites y accesos.
+
+`node tests_boundaries.cjs`, `node tests_boundaries_ui.cjs` y `python tests_maps.py` comprueban caminos, edición en teléfono/escritorio y persistencia con una base temporal.
 
 `python tests_sync.py` verifica API/MySQL con registros propios temporales y los elimina al terminar. Comprueba dependencia, reintentos concurrentes, conflictos, decimales y fecha original.
 
@@ -58,6 +72,8 @@ El catálogo nuevo muestra fecha y antigüedad del último precio normal, con de
 Plan y decisiones: `docs/PLAN_MEJORAS.md` y `docs/MODELO_DATOS.md`.
 
 ## Stock y lista del súper
+
+En **Stock → Revisar stock**, elegir una habitación desde el menú de tarjetas. Cada tarjeta muestra cuántos productos se guardaron como revisados; **Omitir** no suma al avance. Dentro de la habitación se muestra su diagrama y se puede tocar un sector para ir a sus productos. La descripción del espacio actual ocupa todo el ancho, sin la letra ni las otras referencias; su flecha permite volver a verlas sin cambiar el producto ni el conteo. **Siguiente** guarda el conteo antes de avanzar y comparte una fila con **Salir**. **← Habitaciones** vuelve al menú conservando la posición y los conteos sin guardar de cada habitación, incluso al recargar la página en el mismo dispositivo. Las habitaciones sin productos aparecen deshabilitadas y **Sin ubicación** solo aparece cuando corresponde. `node tests_stock_review_ui.cjs` verifica este flujo, la recuperación del avance anterior y la vista en teléfono y escritorio con datos locales de prueba.
 
 Seleccionar producto en Mi stock y confirmar modalidad, unidad y contenido. Envase fijo de 500 g: dos paquetes representan 1000 g. Fraccionado usa referencia de 1000 g/ml; venta por unidad requiere unidad física unidad y contenido 1. Las unidades no se deducen automáticamente del nombre.
 

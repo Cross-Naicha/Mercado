@@ -26,6 +26,10 @@ import mysql.connector
 from stock_api import stock_snapshot
 from database_backup import export_backup
 from shopping_api import shopping_snapshot
+from sync_diagnostics import router as sync_diagnostics_router, record_failure, clear_failure
+import logging
+
+sync_logger = logging.getLogger(__name__)
 
 class Product(BaseModel):
     product: str
@@ -84,11 +88,27 @@ def catalog_endpoint():
 @app.post('/api/sync')
 def sync_endpoint(operation: Operation):
     try:
-        return apply_operation(operation)
+        result = apply_operation(operation)
     except ValidationError as error:
-        raise HTTPException(422, str(error))
+        detail = str(error)
+        try: record_failure(operation, 422, detail)
+        except Exception: sync_logger.exception('No se pudo registrar el error de sincronización')
+        raise HTTPException(422, detail)
+    except HTTPException as error:
+        try: record_failure(operation, error.status_code, error.detail)
+        except Exception: sync_logger.exception('No se pudo registrar el error de sincronización')
+        raise
     except mysql.connector.Error:
-        raise HTTPException(503, 'No se pudo confirmar el guardado; reintentar')
+        detail = 'No se pudo confirmar el guardado; reintentar'
+        try: record_failure(operation, 503, detail)
+        except Exception: sync_logger.exception('No se pudo registrar el error de sincronización')
+        raise HTTPException(503, detail)
+    try: clear_failure(operation.operation_id)
+    except Exception: sync_logger.exception('No se pudo limpiar el error de sincronización')
+    return result
+
+
+app.include_router(sync_diagnostics_router)
 
 @app.get('/api/stock')
 def stock_endpoint():

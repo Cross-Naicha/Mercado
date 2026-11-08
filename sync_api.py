@@ -377,11 +377,16 @@ def get_catalog():
             FROM purchases b JOIN purchase_lines l ON l.purchase_id=b.id
             LEFT JOIN store_branches s ON s.id=b.branch_id''')
         latest_by_store={}
-        def keep_price(product_id,option):
-            local=option['branch_id'] or option['market'] or 'unknown'
-            bucket=latest_by_store.setdefault(product_id,{})
+        regular_by_store={}
+        def keep_latest(prices, product_id, local, option):
+            bucket=prices.setdefault(product_id,{})
             previous=bucket.get(local)
             if previous is None or (option['occurred_at'],option['received_at'],option['id'])>(previous['occurred_at'],previous['received_at'],previous['id']):bucket[local]=option
+        def keep_price(product_id, option):
+            local = option['branch_id'] or option['market']
+            keep_latest(latest_by_store, product_id, local or 'unknown', option)
+            if local and not option['promotion']:
+                keep_latest(regular_by_store, product_id, local, option)
         for entry in cursor.fetchall():
             when=entry['occurred_at'] or datetime.combine(entry['occurred_on'],datetime.min.time()).replace(hour=12)
             zone=entry['event_timezone'] or 'America/Argentina/Buenos_Aires'
@@ -401,20 +406,37 @@ def get_catalog():
             history.setdefault(entry['product_id'],[]).append({'id':entry['purchase_id'],'occurred_at':entry['occurred_at'].isoformat()+'Z','event_timezone':entry['event_timezone'],'price':str(price),'market':entry['market'] or ''})
         cutoff=datetime.now(timezone.utc)-timedelta(days=90)
         now=datetime.now(timezone.utc)
+        def shelf_observation_fields(entry):
+            return {
+                'id': entry['id'], 'branch_id': entry['branch_id'],
+                'received_at': entry['received_at'].isoformat(),
+                'occurred_at': entry['occurred_at'].isoformat()+'Z',
+                'event_timezone': entry['event_timezone'],
+                'price': str(entry['list_price']) if entry['list_price'] is not None else None,
+                'promotion': entry['promotion_code'],
+                'special_quantity': str(entry['quantity']),
+                'special_total': str(entry['total_price']),
+                'promotion_description': entry['promotion_description'],
+                'amount_paid': str(entry['amount_paid']) if entry['amount_paid'] is not None else None,
+            }
         for product_id,entries in observations.items():
             for entry in entries:
                 when=entry['occurred_at'].replace(tzinfo=timezone.utc)
                 multiplier=1000 if entry['quantity_basis'] in ('g','ml') else 1
                 price=(entry['total_price']*multiplier/entry['quantity']).quantize(Decimal('0.0001'),rounding=ROUND_HALF_UP)
                 if entry['quantity_basis'] in ('g','ml') and entry['list_price'] is not None:price=entry['list_price']
-                keep_price(product_id,{'id':entry['id'],'branch_id':entry['branch_id'],'price':str(price),'market':entry['market'] or '',
+                option={'id':entry['id'],'branch_id':entry['branch_id'],'price':str(price),'market':entry['market'] or '',
                     'occurred_at':when.isoformat().replace('+00:00','Z'),'received_at':entry['received_at'].isoformat()+'Z',
                     'date':when.astimezone(ZoneInfo(entry['event_timezone'])).date().isoformat(),'source':'shelf','promotion':entry['promotion_code']!='none',
-                    'conditions':entry['promotion_code'],'description':entry['promotion_description']})
+                    'conditions':entry['promotion_code'],'description':entry['promotion_description']}
+                if option['promotion']:
+                    option['shelf_observation'] = shelf_observation_fields(entry)
+                keep_price(product_id, option)
                 if not cutoff<=when<=now: continue
                 history.setdefault(product_id,[]).append({'id':entry['id'],'occurred_at':when.isoformat(),'event_timezone':entry['event_timezone'],'price':str(price),'market':entry['market'] or ''})
         for p in rows:
             p['price_options']=list(latest_by_store.get(p['id'],{}).values())
+            p['regular_price_options'] = list(regular_by_store.get(p['id'], {}).values())
             p['price_history']=history.get(p['id'],[])
             p['last_price']=str(p['last_price']) if p['last_price'] is not None else None
             p['last_price_date']=p['last_price_date'].isoformat() if p['last_price_date'] else None
@@ -429,8 +451,7 @@ def get_catalog():
             prices=observations.get(p['id'],[])
             if prices:
                 observation=prices[0]
-                p['shelf_observation']={'id':observation['id'],'received_at':observation['received_at'].isoformat(),'occurred_at':observation['occurred_at'].isoformat()+'Z','event_timezone':observation['event_timezone'],'branch_id':observation['branch_id'],'price':str(observation['list_price']) if observation['list_price'] is not None else None,'promotion':observation['promotion_code'],'special_quantity':str(observation['quantity']),'special_total':str(observation['total_price']),'promotion_description':observation['promotion_description']}
-                p['shelf_observation']['amount_paid']=str(observation['amount_paid']) if observation['amount_paid'] is not None else None
+                p['shelf_observation'] = shelf_observation_fields(observation)
                 when=observation['occurred_at'].replace(tzinfo=timezone.utc)
                 day=when.astimezone(ZoneInfo(observation['event_timezone'])).date().isoformat()
                 newer=observation['occurred_at']>=p['last_price_at'] if p['last_price_at'] else not p['last_price_date'] or day>=p['last_price_date']

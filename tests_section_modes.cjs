@@ -23,7 +23,7 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
  await MercadoAvailability.set(branch.id,[product.id,...(typeof other==='undefined'?[]:[other.id])],'available');
  localStorage.setItem('mercado-branch-map-v1:'+branch.id,JSON.stringify({version:2,rows:16,cols:16,precision:1,cells:Array.from({length:256},(_,i)=>i<2?1:0),shelves:[{id:'a',name:'Almacén',color:'#0f7a66',cells:[0,1]}],assignments:{[product.id]:'a',[other.id]:'a'}}));
  },{product,other,branch});
- await page.locator('#tab-walk').click();await page.locator('#walk_branch option[value="'+branch.id+'"]').waitFor({state:'attached'});await page.locator('#active_branch_toggle').click();await page.locator('#active_branch_select').selectOption(branch.id);await page.waitForFunction(()=>document.getElementById('active_branch_picker').hidden);
+ await page.locator('#section_menu_toggle').click();await page.locator('#tab-walk').click();await page.locator('#walk_branch option[value="'+branch.id+'"]').waitFor({state:'attached'});await page.locator('#active_branch_toggle').click();await page.locator('#active_branch_select').selectOption(branch.id);await page.waitForFunction(()=>document.getElementById('active_branch_picker').hidden);
  await page.locator('#walk_map g[role=button]').click();
 
 
@@ -36,20 +36,20 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
  const card=page.locator('#walk_cards [data-product-id="'+product.id+'"]');
  await card.getByRole('button',{name:/^Cuadrado de /}).click();await page.locator('#map_assignment_select_menu').getByRole('option',{name:'Cuadrado 2',exact:true}).click();
  assert.equal(await page.locator('#walk_order_save').isVisible(),true);
- await page.locator('#tab-products').click();
+ await page.locator('#section_menu_toggle').click();await page.locator('#tab-products').click();
  assert.equal(await page.evaluate(()=>document.documentElement.matches('.walk-organize-mode,.prices-mode,.history-mode')),false);
  await mode('prices_mode_toggle');assert.equal(await page.locator('#prices_mode_toggle').getAttribute('aria-pressed'),'true');
- await page.locator('#tab-products').click();assert.equal(await page.locator('#prices_mode_toggle').getAttribute('aria-pressed'),'true');
+ await page.locator('#section_menu_toggle').click();await page.locator('#tab-products').click();assert.equal(await page.locator('#prices_mode_toggle').getAttribute('aria-pressed'),'true');
  await page.locator('#tab-settings').click();assert.equal(await page.locator('#prices_mode_toggle').getAttribute('aria-pressed'),'false');
- await page.locator('#tab-walk').click();await page.locator('#walk_cards .product-card').first().waitFor();
+ await page.locator('#section_menu_toggle').click();await page.locator('#tab-walk').click();await page.locator('#walk_cards .product-card').first().waitFor();
  assert.equal(await card.locator('select').count(),0);assert.equal(await page.locator('#walk_order_save').isVisible(),false);
  assert.equal(await page.evaluate(id=>mercadoMapProducts.context().placements[id].cell,product.id),0);
  await mode('walk_organize_toggle');assert.equal(await page.locator('#walk_order_save').isVisible(),true);await page.locator('#walk_order_save').click();await page.waitForFunction(()=>document.getElementById('walk_order_changes').hidden);
- await page.locator('#tab-products').click();await mode('history_mode_toggle');
- await page.locator('#tab-walk').click();assert.equal(await page.locator('#history_mode_toggle').getAttribute('aria-pressed'),'false');
+ await page.locator('#section_menu_toggle').click();await page.locator('#tab-products').click();await mode('history_mode_toggle');
+ await page.locator('#section_menu_toggle').click();await page.locator('#tab-walk').click();assert.equal(await page.locator('#history_mode_toggle').getAttribute('aria-pressed'),'false');
  assert.equal(await page.evaluate(()=>document.documentElement.matches('.walk-organize-mode,.prices-mode,.history-mode')),false);
  assert.equal(await page.evaluate(id=>mercadoMapProducts.context().placements[id].cell,product.id),1);
- await mode('prices_mode_toggle');await page.locator('#tab-products').click();assert.equal(await page.locator('#prices_mode_toggle').getAttribute('aria-pressed'),'false');
+ await mode('prices_mode_toggle');await page.locator('#section_menu_toggle').click();await page.locator('#tab-products').click();assert.equal(await page.locator('#prices_mode_toggle').getAttribute('aria-pressed'),'false');
  assert.deepEqual(errors,[]);await page.close();}
  console.log('Modos por sección: reset al salir, misma sección preservada, borradores conservados y datos guardados intactos en móvil/escritorio OK');
  } finally {await browser.close();}

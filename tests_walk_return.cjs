@@ -23,7 +23,7 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
  await MercadoAvailability.set(branch.id,[product.id,...(typeof other==='undefined'?[]:[other.id])],'available');
  localStorage.setItem('mercado-branch-map-v1:'+branch.id,JSON.stringify({version:2,rows:16,cols:16,precision:1,cells:Array.from({length:256},(_,i)=>i<2?1:0),shelves:[{id:'a',name:'Almacén',color:'#0f7a66',cells:[0,1]}],assignments:{[product.id]:'a',[other.id]:'a'}}));
  },{product,other,branch});
- await page.locator('#tab-walk').click();await page.locator('#walk_branch option[value="'+branch.id+'"]').waitFor({state:'attached'});await page.locator('#active_branch_toggle').click();await page.locator('#active_branch_select').selectOption(branch.id);await page.waitForFunction(()=>document.getElementById('active_branch_picker').hidden);
+ await page.locator('#section_menu_toggle').click();await page.locator('#tab-walk').click();await page.locator('#walk_branch option[value="'+branch.id+'"]').waitFor({state:'attached'});await page.locator('#active_branch_toggle').click();await page.locator('#active_branch_select').selectOption(branch.id);await page.waitForFunction(()=>document.getElementById('active_branch_picker').hidden);
  await page.locator('#walk_map g[role=button]').click();
 
 
@@ -39,10 +39,27 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
  await options();await page.locator('#product_actions').getByRole('button',{name:'En góndola',exact:true}).click();
  await page.locator('#shelf_price').fill('1250');await page.locator('#shelf_price_form').getByRole('button',{name:'Guardar precio de góndola',exact:true}).click();
  await page.locator('#panel-walk').waitFor({state:'visible'});assert.equal(await page.locator('#walk_zone').inputValue(),zone);
+ await page.waitForFunction(()=>!saving);
+ await card.locator('.product-last-price').filter({hasText:'$1.250,00'}).waitFor();
+ // Una actualización del catálogo debe verse sin salir de Recorrer.
+ await page.evaluate(async id=>{
+  const row=(await localRead('catalog')).find(row=>row.id===id);
+  await localTransaction(['catalog'],tx=>tx.objectStore('catalog').put({...row,normal_price:'1500.0000'}));
+  await read_products();
+ },other.id);
+ await page.locator('#walk_cards [data-product-id="'+other.id+'"] .product-last-price').filter({hasText:'$1.500,00'}).waitFor();
+ // Confirmar el precio y fallar al descargar el catálogo no debe recuperar el anterior.
+ await page.waitForFunction(()=>!syncing);
+ await page.route('**/api/catalog',r=>r.fulfill({status:503,json:{detail:'Sin conexión'}}));
+ await page.route('**/api/sync',r=>{const op=r.request().postDataJSON();return r.fulfill({json:{operation_id:op.operation_id,entity_id:op.entity_id,status:'confirmed'}});});
+ await page.evaluate(()=>sync_pending());
+ assert.equal(await page.evaluate(async()=>(await localRead('outbox')).length),0);
+ await card.locator('.product-last-price').filter({hasText:'$1.250,00'}).waitFor();
+ assert.ok(!(await card.locator('.product-price-caption').textContent()).includes('Pendiente de sincronizar'));
  await options();await page.locator('#product_actions').getByRole('button',{name:'Volver a la lista',exact:true}).click();
  await page.locator('#panel-walk').waitFor({state:'visible'});assert.equal(await page.locator('#walk_zone').inputValue(),zone);
  // Elegir Productos explícitamente cancela el regreso automático.
- await options();await page.locator('#tab-products').click();assert.equal(await page.evaluate(()=>window.productActionReturn),null);
+ await options();await page.locator('#section_menu_toggle').click();await page.locator('#tab-products').click();assert.equal(await page.evaluate(()=>window.productActionReturn),null);
  await page.locator('#product_actions').getByRole('button',{name:'Mismo precio',exact:true}).click();await page.waitForFunction(()=>!saving);
  assert.equal(await page.locator('#panel-products').isVisible(),true);
  assert.deepEqual(errors,[]);await page.close();}

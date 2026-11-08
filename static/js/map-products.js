@@ -81,11 +81,11 @@
             const zone=document.createElement('select');zone.setAttribute('aria-label','Zona de '+productLabel(row));const preview=selected.has(row.id)&&pendingZone!==null,displayZone=preview?pendingZone:assignment(row.id);zoneOptions(zone,state.zones,'Sin asignar',displayZone);
             if(preview&&displayZone!==assignment(row.id)){const hint=document.createElement('small');hint.className='map-assignment-preview-note';hint.textContent='Pendiente de asignar';label.append(hint);entry.classList.add('has-zone-preview');}
             const color=state.zones.find(g=>g.id===displayZone)?.color;if(color)zone.style.borderLeft='8px solid '+color;
-            zone.onchange=async()=>{selected.delete(row.id);const ok=await api.assign(state.branch,[row.id],zone.value);if(!ok){zone.value=assignment(row.id);el('status').textContent='No se pudo guardar la asignación. Volvé a intentarlo.';}};
+            zone.onchange=async()=>{selected.delete(row.id);const ok=await api.assign(state.branch,[row.id],zone.value);if(!ok){zone.value=assignment(row.id);notice('No se pudo guardar la asignación. Volvé a intentarlo.');}};
             const edit=document.createElement('button');edit.type='button';edit.className='map-product-edit';edit.textContent='Editar';edit.setAttribute('aria-label','Editar '+productLabel(row));edit.onclick=()=>void editFromAssignment(row.id);
             const availabilityField=document.createElement('div');availabilityField.className='map-product-availability';
             const availabilitySelect=document.createElement('select');availabilitySelect.setAttribute('aria-label','Disponibilidad de '+productLabel(row));for(const [value,text] of Object.entries(availability.labels))availabilitySelect.add(new Option(text,value));availabilitySelect.value=availabilityRecord.status;
-            availabilitySelect.onchange=async()=>{try{selected.delete(row.id);await availability.set(state.branch,[row.id],availabilitySelect.value);render();el('availability_feedback').textContent='Disponibilidad guardada para esta sucursal.';}catch(error){el('availability_feedback').textContent='No se guardó: '+error.message;render();}};
+            availabilitySelect.onchange=async()=>{try{selected.delete(row.id);await availability.set(state.branch,[row.id],availabilitySelect.value);render();notice('Disponibilidad guardada para esta sucursal.', {success:true});}catch(error){notice('No se guardó: '+error.message);render();}};
             const info=document.createElement('small');info.className='map-availability-detail';
             info.textContent=availabilityRecord.error?'Cambió en otro dispositivo. Revisá el estado del servidor ('+availability.labels[availabilityRecord.server_status]+') y volvé a confirmar.':availabilityRecord.confirmed_at?'Confirmado '+new Date(availabilityRecord.confirmed_at).toLocaleDateString('es-AR')+(availabilityRecord.pending?' · pendiente de sincronizar':''):availabilityRecord.status==='available'?'Disponible por ubicación conocida':'Disponibilidad sin confirmar';
             const assignButton=document.createElement('button');assignButton.type='button';assignButton.className='map-product-assign';assignButton.textContent=assigningProducts.has(row.id)?'Guardando…':'Asignar';assignButton.setAttribute('aria-label','Asignar '+productLabel(row));
@@ -93,15 +93,15 @@
             assignButton.onclick=async()=>{
                 const target=pendingZone;if(!target||assigningProducts.has(row.id))return;
                 assigningProducts.add(row.id);render();
-                try{if(await assignHere(state.branch,[row.id],target)){selected.delete(row.id);el('availability_feedback').textContent=productLabel(row)+' asignado a '+(state.zones.find(g=>g.id===target)?.name||'la zona elegida')+'.';}else el('availability_feedback').textContent='No se pudo guardar la asignación.';}
-                catch(error){el('availability_feedback').textContent='No se guardó: '+error.message;}
+                try{if(await assignHere(state.branch,[row.id],target)){selected.delete(row.id);notice(productLabel(row)+' asignado a '+(state.zones.find(g=>g.id===target)?.name||'la zona elegida')+'.', {success:true});}else notice('No se pudo guardar la asignación.');}
+                catch(error){notice('No se guardó: '+error.message);}
                 finally{assigningProducts.delete(row.id);render();}
             };
             const actions=document.createElement('div');actions.className='map-product-availability-actions';actions.append(availabilitySelect,assignButton);availabilityField.append(actions,info);
             const location=document.createElement('div');location.className='map-cell-controls';
             const currentZone=state.zones.find(g=>g.id===assignment(row.id)),place=state.placements[row.id];
             const cellSelect=document.createElement('select');cellSelect.setAttribute('aria-label','Cuadrado de '+productLabel(row));cellSelect.add(new Option('Sin cuadrado',''));for(const [index,cell] of (currentZone?.cells||[]).entries())cellSelect.add(new Option('Cuadrado '+(index+1)+' · F'+(Math.floor(cell/state.cols)+1)+' C'+(cell%state.cols+1),String(cell)));cellSelect.value=place?String(place.cell):'';cellSelect.disabled=!currentZone;
-            cellSelect.onchange=()=>{const cell=cellSelect.value===''?null:Number(cellSelect.value);menuCells.set(row.id,{zone:currentZone.id,cell});if(!api.place(state.branch,[row.id],cell)){menuCells.delete(row.id);el('status').textContent='No se pudo guardar el cuadrado.';}};
+            cellSelect.onchange=()=>{const cell=cellSelect.value===''?null:Number(cellSelect.value);menuCells.set(row.id,{zone:currentZone.id,cell});if(!api.place(state.branch,[row.id],cell)){menuCells.delete(row.id);notice('No se pudo guardar el cuadrado.');}};
             const field=document.createElement('label');field.className='map-cell-field';const caption=document.createElement('span');caption.textContent='Cuadrado';field.append(caption,cellSelect);
             const orderControls=document.createElement('div');orderControls.className='map-cell-order';
             const hint=document.createElement('small');hint.textContent=!currentZone?'Elegí primero una región':place?'Posición '+(place.order+1):'Elegí un cuadrado para ordenar';orderControls.append(hint);location.append(field,orderControls);
@@ -125,7 +125,7 @@
                 await load();
                 await new Promise(resolve=>requestAnimationFrame(()=>{sidebar.scrollTop=saved.scroll;viewport.scrollLeft=saved.mapX;viewport.scrollTop=saved.mapY;resolve();}));
             };
-        }catch(error){el('status').textContent='No se pudo abrir el producto: '+error.message;}
+        }catch(error){notice('No se pudo abrir el producto: '+error.message);}
     }
     async function load(){
         const token=++generation;
@@ -177,13 +177,13 @@
     el('product_apply').onclick=async()=>{
         const state=api.context(),ids=[...selected],zone=pendingZone;
         if(!zone||!state.zones.some(g=>g.id===zone))return;
-        if(await assignHere(state.branch,ids,zone)){selected.clear();render();el('status').textContent=ids.length+' productos guardados '+(zone?'en la zona elegida.':'sin zona asignada.');}
-        else el('status').textContent='No se pudieron guardar las asignaciones. Volvé a intentarlo.';
+        if(await assignHere(state.branch,ids,zone)){selected.clear();render();notice(ids.length+' productos guardados '+(zone?'en la zona elegida.':'sin zona asignada.'), {success:true});}
+        else notice('No se pudieron guardar las asignaciones. Volvé a intentarlo.');
     };
     el('product_apply_availability').onclick=async()=>{
         const state=api.context(),ids=[...selected],status=el('product_bulk_availability').value;if(!ids.length||!state.branch)return;
-        try{await availability.set(state.branch,ids,status);selected.clear();render();el('availability_feedback').textContent=ids.length+' productos marcados como '+availability.labels[status].toLocaleLowerCase('es')+'.';}
-        catch(error){el('availability_feedback').textContent='No se guardó la disponibilidad: '+error.message;}
+        try{await availability.set(state.branch,ids,status);selected.clear();render();notice(ids.length+' productos marcados como '+availability.labels[status].toLocaleLowerCase('es')+'.', {success:true});}
+        catch(error){notice('No se guardó la disponibilidad: '+error.message);}
     };
     let availabilityRenderPending=false;
     document.addEventListener('mercado-availability-change',()=>{if(document.getElementById('map_assignment_select_menu')?.matches(':popover-open'))availabilityRenderPending=true;else render();});

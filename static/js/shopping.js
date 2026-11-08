@@ -52,8 +52,8 @@ async function findBarcode(code=$('barcode_value').value) {
         const state=await shoppingState(),products=await localRead('catalog');
         const match=state.barcodes.find(b => b.code===code),product=products.find(p => p.id===match?.product_id);
         if (product) {
-            select_product(product.id,product.product_all,product.product_name,product.product_brand,product.product_ptype,product.product_psubtype,product.normal_price,product.normal_unit,product.presentation);
-            notice('Código encontrado: '+product.product_all); openModuleSection('instances_section');
+            await useProduct('purchase',product.id);
+            notice('Código encontrado: '+product.product_all);
         } else {
             reset_form(); $('new_barcode').value=code;
             openModuleSection('register_section');
@@ -196,12 +196,34 @@ async function editBranch(id) {
 async function choosePurchaseBranch(id,{refresh=true}={}) {
     const state=await shoppingState(),branch=state.branches.find(b=>b.id===id);
     id=branch?.id || '';
+    const previousBranch = window.mercadoActiveBranch;
+    const branchChanged = previousBranch !== id;
+    const shelfBranchChanged = $('shelf_branch').value !== id;
+    const purchaseId = $('product_id').value;
+    const purchaseRow = branchChanged && purchasePriceRow?.id === purchaseId
+        ? (await catalogWithPrices()).find(row => row.id === purchaseId)
+        : null;
     await localTransaction(['shopping_choices'],tx=>tx.objectStore('shopping_choices').put({id:'active_branch',branch_id:id}));
     window.mercadoActiveBranch=id;
     for(const field of ['purchase_branch','shelf_branch','route_branch']) {
         fillSelect(field,state.branches,b=>b.name+' · '+(b.address||'Local sin confirmar'),'Elegí local');$(field).value=id;
     }
     $('market').value=branch?(branch.name+' · '+(branch.address||'Local sin confirmar')).slice(0,255):'';$('shelf_market').value=$('market').value;
+    if (branchChanged) {
+        for (const priceId of ['price','compare_product_reference','new_price','new_fractional_price']) {
+            applyPriceCentDefault(priceId);
+        }
+        const hasUnassignedPrice = !previousBranch && ($('price').value || $('purchase_total').value || purchasePromotionCode()!=='none');
+        if (purchasePriceRow?.id === $('product_id').value && !hasUnassignedPrice) {
+            if (purchaseRow?.id === purchasePriceRow.id) purchasePriceRow = purchaseRow;
+            fillBranchPurchasePrice(purchasePriceRow,id);
+        } else updatePurchasePromotion(false);
+        updateNewFractionalPreview();
+    }
+    if (branchChanged || shelfBranchChanged) {
+        applyPriceCentDefault('shelf_price');
+        updateShelfFractionalPreview();
+    }
     await renderShelfLocals(state);await renderPurchaseLocals(state);
     document.dispatchEvent(new CustomEvent('mercado-active-branch-change',{detail:{id}}));
     if(refresh)await renderShopping();
@@ -305,7 +327,13 @@ async function renderShopping() {
     for (const id of ['route_branch','branch_edit','purchase_branch','shelf_branch']) fillSelect(id,state.branches,b => `${b.name} · ${b.address || 'Local sin confirmar'}`,id==='branch_edit' ? 'Nuevo local' : 'Elegí local');
     const remembered=(await localRead('shopping_choices')).find(choice=>choice.id==='active_branch');
     const active=state.branches.some(branch=>branch.id===remembered?.branch_id)?remembered.branch_id:'';
-    if(window.mercadoActiveBranch!==active || ['purchase_branch','shelf_branch','route_branch'].some(id=>$(id).value!==active))await choosePurchaseBranch(active,{refresh:false});
+    const correction = shelfEditingObservation;
+    const shelfBranch = $('shelf_branch').value;
+    if (window.mercadoActiveBranch!==active || ['purchase_branch','route_branch'].some(id=>$(id).value!==active)
+        || (!correction && shelfBranch!==active)) {
+        await choosePurchaseBranch(active,{refresh:false});
+        if (correction && shelfEditingObservation===correction) $('shelf_branch').value=shelfBranch;
+    }
     document.dispatchEvent(new Event('mercado-shopping-rendered'));
     await renderBranchCards(state);
     await renderShelfLocals(state);

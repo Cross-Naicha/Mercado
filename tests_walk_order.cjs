@@ -23,7 +23,9 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
  await MercadoAvailability.set(branch.id,[product.id,...(typeof other==='undefined'?[]:[other.id])],'available');
  localStorage.setItem('mercado-branch-map-v1:'+branch.id,JSON.stringify({version:2,rows:16,cols:16,precision:1,cells:Array.from({length:256},(_,i)=>i<2?1:0),shelves:[{id:'a',name:'Almacén',color:'#0f7a66',cells:[0,1]}],assignments:{[product.id]:'a',[other.id]:'a'}}));
  },{product,other,branch});
- await page.locator('#tab-walk').click();await page.locator('#walk_branch option[value="'+branch.id+'"]').waitFor({state:'attached'});await page.locator('#active_branch_toggle').click();await page.locator('#active_branch_select').selectOption(branch.id);await page.waitForFunction(()=>document.getElementById('active_branch_picker').hidden);
+ const openSection=async id=>{await page.locator('#section_menu_toggle').click();await page.locator('#tab-'+id).click();};
+ const organize=async()=>{await page.locator('#products_floating_toggle').click();await page.locator('#walk_organize_toggle').click();};
+ await openSection('walk');await page.locator('#walk_branch option[value="'+branch.id+'"]').waitFor({state:'attached'});await page.locator('#active_branch_toggle').click();await page.locator('#active_branch_select').selectOption(branch.id);await page.waitForFunction(()=>document.getElementById('active_branch_picker').hidden);
  await page.locator('#walk_map g[role=button]').click();
 
 
@@ -33,26 +35,26 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
  assert.equal(await page.locator('#walk_cards .walk-square-heading').innerText(),'Cuadrado 1');
  assert.equal(await page.locator('.walk-product-location').count(),0);
  assert.equal(await page.locator('#walk_cards .walk-card-order').count(),0);
- await page.locator('#products_floating_toggle').click();await page.locator('#walk_organize_toggle').click();
+ await organize();
  const card=page.locator('#walk_cards [data-product-id="'+product.id+'"]');
  await card.getByRole('button',{name:/^Bajar /}).click();
  assert.equal(await page.locator('#walk_order_save').isVisible(),true);
  assert.equal(await page.locator('#walk_cards .product-card').first().getAttribute('data-product-id'),other.id);
  assert.equal(await page.evaluate(id=>mercadoMapProducts.context().placements[id].order,product.id),0);
- await page.locator('#tab-products').click();await page.locator('#tab-walk').click();
- await page.locator('#walk_order_save').click();await page.waitForFunction(()=>document.getElementById('walk_order_status').textContent.includes('Cambios guardados'));
+ await openSection('products');await openSection('walk');await organize();
+ await page.locator('#walk_order_save').click();await page.waitForFunction(()=>document.getElementById('save_status').textContent.includes('Cambios guardados'));
  assert.equal(await page.evaluate(id=>mercadoMapProducts.context().placements[id].order,product.id),1);
  assert.equal(await page.locator('#walk_order_save').isVisible(),false);
- await page.locator('#tab-maps').click();await page.locator('#map_view_products').click();await page.locator('#map_product_only_available').uncheck();
+ await openSection('maps');await page.locator('#map_view_products').click();await page.locator('#map_product_only_available').uncheck();
  assert.ok((await page.locator('.map-product-row[data-product-id="'+product.id+'"] .map-cell-order small').innerText()).includes('2'));
- await page.locator('#tab-walk').click();await page.locator('#walk_cards .product-card').first().waitFor();
+ await openSection('walk');await page.locator('#walk_cards .product-card').first().waitFor();await organize();
  await card.getByRole('button',{name:/^Subir /}).click();await page.locator('#walk_order_discard').click();
  assert.equal(await page.locator('#walk_cards .product-card').first().getAttribute('data-product-id'),other.id);
  await page.locator('#walk_direction_map [data-endpoint=last]').click();assert.equal(await page.locator('#walk_cards .product-card').first().getAttribute('data-product-id'),product.id);
  await card.getByRole('button',{name:/^Bajar /}).click();
  // Un cambio de ubicación concurrente impide guardar un borrador viejo.
  await page.evaluate(id=>mercadoMapProducts.place(mercadoActiveBranch,[id],1),other.id);
- await page.locator('#walk_order_save').click();assert.ok((await page.locator('#walk_order_status').innerText()).includes('El mapa cambió'));
+ await page.locator('#walk_order_save').click();assert.ok((await page.locator('#save_status').innerText()).includes('El mapa cambió'));
  await page.locator('#walk_order_discard').click();
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
  await page.locator('#walk_products').screenshot({path:'walk-order-preview-'+width+'.png'});

@@ -26,9 +26,15 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
  {operation_id:'pending-preview-2',entity_id:'p2',kind:'shelf_price',created_at:new Date().toISOString(),payload:{product:'Aceite de girasol · 900 ml',price:'2500',market:'Supermercado'},error:'Revisá la unidad del producto antes de guardar el precio.',error_status:422},
  {operation_id:'pending-preview-3',entity_id:'p3',kind:'product_edit',created_at:new Date().toISOString(),payload:{product:'Arroz largo fino · 1 kg',brand:'Gallo'}}];
  await localTransaction(['outbox'],tx=>operations.forEach(op=>tx.objectStore('outbox').put(op)));
- await updateStatus();document.getElementById('pending_details').open=true;
+ await updateStatus();
  });
- await page.locator('#tab-settings').click();
+ await page.locator('#sync_menu_button').click();
+ assert.equal(await page.locator('#panel-settings').isVisible(),true);
+ assert.equal(await page.locator('#pending_details').getAttribute('open'),'');
+ assert.equal(await page.locator('#pending_details').evaluate(el=>{const r=el.getBoundingClientRect();return r.top<innerHeight&&r.bottom>0;}),true);
+ await page.evaluate(()=>window.scrollTo(0,0));
+ await page.locator('#sync_status button').click();
+ assert.equal(await page.locator('.pending-card[data-state=attention]').evaluate(el=>{const r=el.getBoundingClientRect();return r.top<innerHeight&&r.bottom>0;}),true);
  assert.equal(await page.locator('#pending_count').innerText(),'3');
  assert.equal(await page.locator('.pending-card').count(),3);
  assert.equal(await page.locator('.pending-card[data-state=attention]').count(),1);

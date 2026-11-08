@@ -5,7 +5,7 @@
     <title>Mercado domestico</title>
     <link rel="icon" href="data:,">
     
-    <link rel="stylesheet" href="/static/css/style.css?v=365">
+    <link rel="stylesheet" href="/static/css/style.css?v=412">
     <link rel="manifest" href="/static/manifest.json">
 
     <meta name="theme-color" content="#2c3e50">
@@ -26,7 +26,7 @@
         <button onclick="document.getElementById('instances_section').scrollIntoView({behavior:'smooth'})">
             Compras
         </button>
-        <button onclick="document.getElementById('stock_section').scrollIntoView({behavior:'smooth'})">Mi stock</button>
+        <button onclick="document.getElementById('stock_section').scrollIntoView({behavior:'smooth'})">Stock</button>
 
         <button onclick="document.getElementById('register_section').scrollIntoView({behavior:'smooth'})">
             Nuevo Producto
@@ -57,10 +57,14 @@
                 <span id="backup_file_name">Ningún archivo seleccionado</span>
             </div>
         </div>
-        <p id="save_status" role="status"></p>
+        <p id="save_status" class="app-notice" role="status"></p>
         <details id="pending_details" class="pending-panel">
             <summary><span class="pending-panel-icon" aria-hidden="true">↻</span><span class="pending-panel-heading"><strong>Registros pendientes</strong><span id="pending_caption">Revisá el estado de tus cambios</span></span><span id="pending_count" class="pending-count">0</span><span class="pending-chevron" aria-hidden="true">⌄</span></summary>
             <div class="pending-panel-body"><p class="pending-help">Tus cambios quedan guardados en este dispositivo hasta que se sincronizan. Si una compra tiene un importe incorrecto, corregí la cantidad y el total; el precio medio se calcula automáticamente.</p><ul id="pending_list"></ul></div>
+        </details>
+        <details id="sync_diagnostics" class="pending-panel">
+            <summary><span class="pending-panel-icon" aria-hidden="true">!</span><span class="pending-panel-heading"><strong>Pendientes de otros dispositivos</strong><span>Consultá desde la PC los motivos de sincronización del teléfono</span></span><span id="sync_diagnostics_count" class="pending-count">0</span><span class="pending-chevron" aria-hidden="true">⌄</span></summary>
+            <div class="pending-panel-body"><p class="pending-help">El teléfono envía el estado de sus pendientes cuando se conecta. Los errores del servidor también aparecen aquí.</p><button type="button" id="sync_diagnostics_refresh" onclick="refreshSyncDiagnostics()">Actualizar estados</button><p id="sync_diagnostics_status" role="status"></p><ul id="sync_diagnostics_list"></ul></div>
         </details>
         <section class="map-sync-settings" aria-label="Sincronización de mapas">
         <p id="map_sync_status" role="status"></p>
@@ -77,7 +81,7 @@
     <button type="button" class="clear-filters" aria-label="Limpiar búsqueda" title="Limpiar búsqueda" onclick="reset_form()">&lt;</button>
     </div>
 
-    <button id="search_add_product" type="button" hidden onclick="showModule('new')">Agregar nuevo producto</button>
+    <button id="search_add_product" type="button" hidden onclick="createProductFromSearch()">Agregar nuevo producto</button>
 
     <!-- Filtros de la tabla -->
     <div id="active_filters" class="catalog-filters" hidden aria-label="Filtros activos"></div>
@@ -94,41 +98,70 @@
             <!-- Aquí se insertarán los datos -->
         </tbody>
     </table>
-    <button id="search_add_product_bottom" type="button" hidden onclick="showModule('new')">Agregar nuevo producto</button>
+    <button id="search_add_product_bottom" type="button" hidden onclick="createProductFromSearch()">Agregar nuevo producto</button>
 
     <div id="product_editor_home">
-    <section id="product_editor" hidden>
-        <button type="button" class="editor-floating-back" aria-label="Volver a la lista sin guardar" title="Volver sin guardar" onclick="closeProductEditor()">&lt;</button>
-        <h2>Editar producto</h2>
-        <form>
-            <label>Producto <input id="edit_name" maxlength="255" required></label>
-            <label>Marca <input id="edit_brand" maxlength="255"></label>
-            <label>Tipo <input id="edit_type" maxlength="255"></label>
-            <label>Subtipo <input id="edit_subtype" maxlength="255"></label>
-            <label>Sabor <input id="edit_flavor" maxlength="255"></label>
-            <label>Categoría <input id="edit_category" maxlength="255"></label>
-            <label>Regularidad <select id="edit_stock_pattern" onchange="updateStockPatternFields()"><option value="stable">Estable</option><option value="irregular">Irregular</option></select></label>
-            <label>Ubicación <input id="edit_storage_location" maxlength="255"></label>
-            <label>Ubicación interna <input id="edit_storage_detail" maxlength="255"></label>
-        <label>Modalidad <select id="stock_sale_mode"><option value="">Sin confirmar</option><option value="package" selected>Envase de contenido fijo</option><option value="multipack">Paquete de varias unidades</option><option value="fractional">Fraccionado por peso/volumen</option><option value="unit">Por unidad</option></select></label>
-        <label>Unidad de contenido <select id="stock_content_unit"><option value="g">Gramos</option><option value="kg">Kilos</option><option value="ml">Mililitros</option><option value="l">Litros</option><option value="unit">Unidades</option></select></label>
-        <label>Contenido por envase <input id="stock_package_content" type="number" step="any" min="0"></label>
-        <label>Contenido de cada unidad (opcional) <input id="stock_unit_content" type="text" inputmode="decimal" step="any" min="0"></label>
-        <label>Contenido total del paquete (opcional) <input id="stock_total_content" type="text" inputmode="decimal"></label>
-        <label>Medida de cada unidad <select id="stock_unit_content_unit"><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="l">litros</option></select></label>
-            <button type="button" onclick="saveProductEdit()">Guardar cambios</button>
-            <button type="button" onclick="newPresentationFromEdit()">Crear otra presentación</button>
-            <button type="button" onclick="editShelfObservation()">Editar góndola</button>
-            <button type="button" class="editor-delete-button" onclick="showDeleteProductConfirmation()">Borrar producto</button>
-            <div id="delete_product_confirmation" hidden>
-                <p>¿Borrar este producto? Se quitará del catálogo y se conservará su historial de compras y precios.</p>
-                <p id="delete_product_status" role="status" hidden></p>
-                <div id="delete_with_stock_confirmation" hidden>
-                    <p>¿Deseás borrar de todas formas? Las existencias de este producto quedarán en cero en todas sus ubicaciones. Su historial se conservará.</p>
-                    <button type="button" class="editor-delete-button" onclick="deleteEditedProduct(true)">Dejar stock en cero y borrar</button>
+    <section id="product_editor" aria-label="Editar producto" hidden>
+        <header class="product-edit-header">
+            <p>Editar producto</p>
+            <h2 id="product_edit_heading" tabindex="-1"></h2>
+            <p id="product_edit_summary"></p>
+        </header>
+        <form id="product_edit_form" autocomplete="off" novalidate>
+            <div id="product_edit_tabs" role="tablist" aria-label="Secciones de edición">
+                <button id="product_edit_tab_data" type="button" role="tab" aria-selected="true" aria-controls="product_edit_data">Datos</button>
+                <button id="product_edit_tab_presentation" type="button" role="tab" aria-selected="false" aria-controls="product_edit_presentation" tabindex="-1">Presentación</button>
+                <button id="product_edit_tab_stock" type="button" role="tab" aria-selected="false" aria-controls="product_edit_stock" tabindex="-1">Stock</button>
+            </div>
+            <section id="product_edit_data" class="product-edit-fields" role="tabpanel" aria-labelledby="product_edit_tab_data">
+                <label class="product-edit-field product-edit-wide">Producto <input id="edit_name" maxlength="255" required></label>
+                <label class="product-edit-field">Marca <input id="edit_brand" maxlength="255"></label>
+                <label class="product-edit-field">Categoría <input id="edit_category" maxlength="255"></label>
+                <details id="product_edit_details" class="product-edit-wide product-edit-disclosure">
+                    <summary>Más datos</summary>
+                    <div class="product-edit-fields">
+                        <label class="product-edit-field">Tipo <input id="edit_type" maxlength="255"></label>
+                        <label class="product-edit-field">Subtipo <input id="edit_subtype" maxlength="255"></label>
+                        <label class="product-edit-field product-edit-wide">Sabor <input id="edit_flavor" maxlength="255"></label>
+                    </div>
+                </details>
+            </section>
+            <section id="product_edit_presentation" class="product-edit-fields" role="tabpanel" aria-labelledby="product_edit_tab_presentation" hidden>
+                <label class="product-edit-field product-edit-wide">Modalidad <select id="stock_sale_mode"><option value="">Sin confirmar</option><option value="package" selected>Envase de contenido fijo</option><option value="multipack">Paquete de varias unidades</option><option value="fractional">Fraccionado por peso/volumen</option><option value="unit">Por unidad</option></select></label>
+                <label class="editor-field-row product-edit-field"><span id="stock_package_content_label">Contenido por envase</span><input id="stock_package_content" type="number" inputmode="decimal" step="any" min="0"></label>
+                <label class="editor-field-row product-edit-field">Unidad de contenido <select id="stock_content_unit"><option value="g">Gramos</option><option value="kg">Kilos</option><option value="ml">Mililitros</option><option value="l">Litros</option><option value="unit">Unidades</option></select></label>
+                <label class="editor-field-row product-edit-field">Contenido de cada unidad (opcional) <input id="stock_unit_content" type="text" inputmode="decimal" step="any" min="0"></label>
+                <label class="editor-field-row product-edit-field">Contenido total del paquete (opcional) <input id="stock_total_content" type="text" inputmode="decimal"></label>
+                <label class="editor-field-row product-edit-field">Medida de cada unidad <select id="stock_unit_content_unit"><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="l">litros</option></select></label>
+                <p id="product_edit_units_locked" class="product-edit-wide product-edit-hint" hidden>Para cambiar la modalidad, la unidad o el contenido de un producto con stock, creá otra presentación.</p>
+            </section>
+            <section id="product_edit_stock" class="product-edit-fields" role="tabpanel" aria-labelledby="product_edit_tab_stock" hidden>
+                <label class="product-edit-field product-edit-wide">Regularidad <select id="edit_stock_pattern" onchange="updateStockPatternFields()"><option value="stable">Estable</option><option value="irregular">Irregular</option></select></label>
+                <label class="product-edit-field">Ubicación <input id="edit_storage_location" maxlength="255"></label>
+                <label class="product-edit-field">Ubicación interna <input id="edit_storage_detail" maxlength="255"></label>
+            </section>
+            <details id="product_edit_actions" class="product-edit-disclosure">
+                <summary>Más acciones</summary>
+                <div class="product-edit-secondary-actions">
+                    <button type="button" onclick="newPresentationFromEdit()">Crear otra presentación</button>
+                    <button type="button" onclick="editShelfObservation()">Editar precio de góndola</button>
                 </div>
-                <button type="button" class="editor-delete-button" onclick="deleteEditedProduct()">Confirmar borrado</button>
-                <button type="button" onclick="document.getElementById('delete_product_confirmation').hidden=true">Cancelar</button>
+                <div class="product-edit-danger">
+                    <button type="button" class="editor-delete-button" onclick="showDeleteProductConfirmation()">Borrar producto</button>
+                    <div id="delete_product_confirmation" hidden>
+                        <p>¿Borrar este producto? Se quitará del catálogo y se conservará su historial de compras y precios.</p>
+                        <div id="delete_with_stock_confirmation" hidden>
+                            <p>¿Deseás borrar de todas formas? Las existencias de este producto quedarán en cero en todas sus ubicaciones. Su historial se conservará.</p>
+                            <button type="button" class="editor-delete-button" onclick="deleteEditedProduct(true)">Dejar stock en cero y borrar</button>
+                        </div>
+                        <button type="button" class="editor-delete-button" onclick="deleteEditedProduct()">Confirmar borrado</button>
+                        <button type="button" onclick="document.getElementById('delete_product_confirmation').hidden=true">Cancelar borrado</button>
+                    </div>
+                </div>
+            </details>
+            <div class="product-edit-footer">
+                <button id="cancel_product_edit" type="button" onclick="closeProductEditor()">Cancelar</button>
+                <button id="save_product_edit" type="submit">Guardar cambios</button>
             </div>
         </form>
     </section>
@@ -171,8 +204,8 @@
             <div id="shelf_special_fields" hidden>
                 <input id="shelf_special_quantity" type="number" inputmode="numeric" min="1" max="1000000" step="1" placeholder="Cantidad de envases o unidades" aria-label="Cantidad de envases o unidades">
                 <input id="shelf_special_total" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Importe total de la oferta" aria-label="Importe total de la oferta">
-                <textarea id="shelf_special_description" maxlength="500" placeholder="Descripción: ej. 4 turrones por $1.000" aria-label="Descripción de la oferta"></textarea>
             </div>
+            <textarea id="shelf_special_description" maxlength="500" placeholder="Descripción de la oferta" aria-label="Descripción de la oferta" hidden></textarea>
             <input id="shelf_date" type="date" aria-label="Fecha">
             <div id="shelf_local_options" class="catalog-filters" aria-label="Elegir local"></div>
             <button type="button" onclick="saveShelfPrice()">Guardar precio de góndola</button>
@@ -279,30 +312,46 @@
     </form>
 
     <h1 id="cart_section" class="section">Carrito</h1>
-    <p>Revisá el total antes de confirmar.</p>
-    <button type="button" onclick="openOccasionalCart()">Agregar compra ocasional</button>
+    <div id="cart_items"></div>
     <form id="occasional_cart_form" hidden onsubmit="saveOccasionalCart(event)">
         <input id="occasional_description" type="text" maxlength="255" placeholder="Descripción (opcional)" aria-label="Descripción">
         <input id="occasional_total" type="text" inputmode="decimal" required placeholder="Importe total" aria-label="Importe total">
         <button type="submit">Guardar</button>
         <button type="button" class="occasional-cancel" onclick="document.getElementById('occasional_cart_form').hidden=true">Cancelar</button>
     </form>
-    <div id="cart_items"></div>
-    <p id="cart_total" aria-live="polite"></p>
-    <button type="button" id="cart_confirm" onclick="confirmCart()" disabled>Confirmar compra</button>
-
-    <h1 id="stock_section" class="section">Mi stock</h1>
-    <button id="stock_review_button" type="button" onclick="openStockReview()">Revisar stock</button>
-    <section id="stock_review" hidden aria-label="Revisión de stock">
-        <div id="stock_review_rooms" class="catalog-filters"></div>
-        <p id="stock_review_progress" aria-live="polite"></p>
-        <div id="stock_review_card"></div>
-        <div id="stock_review_actions" class="stock-review-actions" hidden>
-            <button id="stock_review_previous" type="button" onclick="stepStockReview(-1)">Anterior</button>
-            <button type="button" onclick="stepStockReview(1)">Omitir</button>
-            <button id="stock_review_save" type="button" onclick="saveStockReviewCard()">Guardar y siguiente</button>
+    <footer id="cart_footer">
+        <div id="cart_footer_summary">
+            <p id="cart_total" aria-live="polite"></p>
         </div>
-        <button type="button" class="stock-location-cancel" onclick="closeStockReview()">Salir de la revisión</button>
+        <button type="button" id="cart_add_occasional" onclick="openOccasionalCart()">Agregar compra ocasional</button>
+        <button type="button" id="cart_confirm" onclick="confirmCart()" disabled>Confirmar compra</button>
+    </footer>
+
+    <h1 id="stock_section" class="section">Stock</h1>
+    <div id="stock_view_switch" role="group" aria-label="Tipo de revisión de stock">
+        <button id="stock_general_button" type="button" aria-pressed="true" onclick="closeStockReview()">Revisión general</button>
+        <button id="stock_review_button" type="button" aria-pressed="false" aria-controls="stock_review" onclick="openStockReview()">Revisión sistemática</button>
+        <h2 id="stock_review_room_title" tabindex="-1" hidden>Habitaciones</h2>
+    </div>
+    <section id="stock_review" hidden aria-label="Revisión de stock">
+        <div id="stock_review_menu">
+            <h2 id="stock_review_menu_title" tabindex="-1">Elegí una habitación</h2>
+            <p id="stock_review_menu_help" hidden></p>
+            <div id="stock_review_rooms" aria-labelledby="stock_review_menu_title"></div>
+        </div>
+        <div id="stock_review_body" hidden>
+            <div id="stock_review_layout" class="kitchen-filters" hidden></div>
+            <p id="stock_review_progress" aria-live="polite" hidden></p>
+            <div id="stock_review_card"></div>
+            <div id="stock_review_actions" class="stock-review-actions" hidden>
+                <button id="stock_review_previous" type="button" onclick="stepStockReview(-1)">Anterior</button>
+                <button type="button" onclick="stepStockReview(1)">Omitir</button>
+            </div>
+        </div>
+        <div id="stock_review_footer" class="stock-review-footer" hidden>
+            <button id="stock_review_back" type="button" onclick="showStockReviewRooms()">Habitaciones</button>
+            <button id="stock_review_save" type="button" onclick="saveStockReviewCard()" hidden>Siguiente</button>
+        </div>
     </section>
     <section id="stock_locations_section" aria-label="Ubicaciones de los productos">
         <div id="stock_location_filters" class="catalog-filters"></div>
@@ -429,6 +478,16 @@
         <div class="map-tools" aria-label="Vistas del mapa"><button type="button" id="map_view_draw" aria-pressed="true">Dibujar</button><button type="button" id="map_view_products" aria-pressed="false">Asignar</button><button type="button" id="map_view_zones" aria-pressed="false">Zonas</button></div>
         <label class="map-phone-zoom">Vista del mapa <select id="map_phone_zoom"><option value="0.25">Reducir a ¼</option><option value="0.5">Reducir a ½</option><option value="0.75">Reducir a ¾</option><option value="1" selected>Ajustar a pantalla</option><option value="1.5">Ampliar 1,5×</option><option value="2">Ampliar 2×</option><option value="3">Ampliar 3×</option><option value="4">Ampliar 4×</option></select></label>
         <div id="map_drawing_view">
+        <details id="map_boundary_tools" class="map-option-card"><summary>Límites y accesos</summary>
+            <div class="map-option-content">
+                <p>Rojo continuo: pared que bloquea el paso en ambos sentidos. Azul punteado: lado habilitado para alcanzar productos. Ocre punteado: acceso deshabilitado. Las góndolas ocupadas no se atraviesan. Sin configuración de acceso, se admiten los lados junto a espacio libre; una pared siempre bloquea el acceso.</p>
+                <div class="map-tools"><label>Herramienta <select id="map_boundary_mode"><option value="off">Desactivada</option><option value="wall">Bloquear / abrir paso</option><option value="access">Habilitar / quitar acceso</option><option value="auto">Restaurar acceso automático</option><option value="probe">Probar camino y acceso</option></select></label>
+                <label>Lado para teclado <select id="map_boundary_side"><option value="north">Norte · arriba</option><option value="east">Este · derecha</option><option value="south">Sur · abajo</option><option value="west">Oeste · izquierda</option></select></label></div>
+                <label><input id="map_boundary_zone" type="checkbox"> Aplicar lados de acceso a toda la góndola</label>
+                <p>Tocá cerca del borde de un cuadrado para alternarlo. Para editar un solo cuadrado, dejá la casilla desmarcada. Los cambios se guardan automáticamente; Deshacer revierte la última edición.</p>
+                <p id="map_boundary_status" role="status"></p>
+            </div>
+        </details>
         <p id="map_help">Tocá una celda para alternar entre espacio libre y góndola. También podés arrastrar: cada celda cambia una sola vez por trazo.</p>
         <div class="map-tools" aria-label="Herramientas de dibujo">
             <label>Modo <select id="map_mode"><option value="draw">Dibujar</option><option value="name">Nombrar góndolas</option></select></label>
@@ -497,7 +556,6 @@
             </div>
             <p id="map_product_help" role="status"></p>
             <div class="map-availability-bulk"><label>Disponibilidad de seleccionados <select id="map_product_bulk_availability"><option value="available">Disponible</option><option value="unavailable">No disponible</option><option value="unknown">Sin confirmar</option></select></label><button type="button" id="map_product_apply_availability">Confirmar disponibilidad</button></div>
-            <p id="map_availability_feedback" role="status"></p>
             <p class="map-note">No disponible: esta sucursal no ofrece el producto. No indica una falta temporal de stock. La ubicación anterior se conserva como referencia.</p>
             <div id="map_product_list" aria-label="Productos y sus zonas"></div>
             <div class="map-assignment-bar" aria-label="Confirmar asignación de productos">
@@ -518,6 +576,35 @@
         <select id="walk_zone" hidden aria-label="Zona activa"></select>
         <button type="button" id="walk_change" hidden>Cambiar zona</button>
     </div>
+    <label class="walk-mode-switch"><input id="walk_auto_toggle" type="checkbox" role="switch" aria-controls="walk_auto"><span class="walk-switch-track" aria-hidden="true"></span><span>Recorrido automático</span></label>
+    <div id="walk_auto" hidden>
+        <div class="walk-auto-card">
+            <div id="walk_auto_setup" hidden>
+            <select id="walk_auto_pick" hidden aria-label="Punto a marcar"><option value="start">Inicio</option><option value="end">Final</option></select>
+            <input id="walk_auto_sr" type="hidden" value="1"><input id="walk_auto_sc" type="hidden" value="1"><input id="walk_auto_er" type="hidden" value="1"><input id="walk_auto_ec" type="hidden" value="1">
+            </div>
+            <div class="walk-endpoint-buttons">
+                <div class="walk-endpoint-group" role="group" aria-label="Puntos del recorrido">
+                    <button id="walk_auto_start" type="button" aria-pressed="true"><span class="walk-point-dot" aria-hidden="true"></span>Inicio</button>
+                    <button id="walk_auto_end" type="button" aria-pressed="false"><span class="walk-point-dot walk-point-final" aria-hidden="true"></span>Final</button>
+                </div>
+                <button id="walk_auto_calculate" type="button">Recorrer <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></button>
+            </div>
+            <div id="walk_auto_live" hidden>
+                <div class="walk-auto-session"><span id="walk_auto_phase" class="walk-auto-eyebrow">En recorrido</span><button id="walk_auto_restart" type="button" aria-label="Reiniciar recorrido"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10a9 9 0 1 1 1 7M3 4v6h6"/></svg>Reiniciar</button></div>
+                <div class="walk-auto-destination"><h2 id="walk_auto_destination"></h2><span id="walk_auto_stop_badge"></span></div>
+                <p id="walk_auto_stop_detail"></p>
+                <div id="walk_auto_progress" class="walk-auto-progress" role="progressbar" aria-label="Avance del recorrido" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="walk_auto_progress_fill"></span></div>
+            </div>
+            <div class="walk-auto-map-frame">
+                <div class="walk-auto-map-bar"><span id="walk_auto_map_hint">Marcando inicio</span><span class="walk-auto-legend"><span><i class="walk-point-dot" aria-hidden="true"></i>Inicio</span><span><i class="walk-point-dot walk-point-final" aria-hidden="true"></i>Final</span></span></div>
+                <div id="walk_auto_map" class="walk-map" aria-label="Mapa del recorrido automático"></div>
+            </div>
+            <div id="walk_auto_metrics" class="walk-auto-metrics" hidden><span><strong id="walk_auto_total_stops"></strong>paradas</span><span><strong id="walk_auto_total_items"></strong>específicos</span><span><strong id="walk_auto_total_steps"></strong>pasos aprox.</span></div>
+            <p id="walk_auto_status" role="status"></p>
+            <details id="walk_auto_pending" class="walk-auto-pending" hidden><summary id="walk_auto_pending_count"></summary><ul id="walk_auto_warnings"></ul></details>
+        </div>
+    </div>
     <p id="walk_status" role="status">Elegí una sucursal para ver su mapa.</p>
     <div id="walk_map" class="walk-map" hidden></div>
     <div id="walk_zones" class="walk-zones" role="group" aria-label="Zonas del supermercado" hidden></div>
@@ -534,6 +621,7 @@
         <div class="walk-section-navigation"><button id="walk_previous_section" type="button">← Anterior</button><span id="walk_section_progress"></span><button id="walk_next_section" type="button">Siguiente sección →</button></div>
         <p id="walk_route_complete" role="status" hidden>Recorrido terminado</p>
     </section>
+            <div id="walk_auto_navigation" class="walk-auto-navigation" hidden><button id="walk_auto_previous" type="button">← Anterior</button><button id="walk_auto_next" type="button">Cuadrado revisado →</button></div>
     <h1 id="register_section" class="section">Registro</h1>
     <input id="new_barcode" type="hidden">
 
@@ -565,6 +653,7 @@
         <label>Contenido total del paquete (opcional) <input id="new_total_content" type="text" inputmode="decimal"></label>
         <label>Medida de cada unidad <select id="new_unit_content_unit"><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="l">litros</option></select></label>
         <label>Precio por kg/litro <input id="new_fractional_price" type="number" inputmode="decimal" step="any" min="0"></label>
+        <label class="shelf-cent-option" hidden><input id="new_fractional_subtract_cent" type="checkbox"> −0,01</label>
         <label>Importe pagado en esta compra <input id="new_fractional_total" type="number" inputmode="decimal" step="any" min="0"></label>
         <p id="new_fractional_amount" hidden aria-live="polite"></p>
 
@@ -576,10 +665,24 @@
 </body>
 
 <script>
+window.notice = (() => {
+    const status = document.getElementById('save_status');
+    let timer;
+    return (message, {success = false} = {}) => {
+        clearTimeout(timer);
+        status.hidden = false;
+        status.toggleAttribute('data-success', success);
+        status.textContent = message;
+        if (message) timer = setTimeout(() => {
+            status.textContent = '';
+            status.removeAttribute('data-success');
+        }, 4500);
+    };
+})();
+
 // Se entrega con el HTML para poder actualizar incluso si los scripts siguen en una caché anterior.
 window.updateMercadoApp=async function() {
-    const status=document.getElementById('save_status');
-    status.textContent='Buscando la última versión…';
+    notice('Buscando la última versión…');
     try {
         if(!('serviceWorker' in navigator)) {location.reload();return;}
         const registration=await navigator.serviceWorker.register('/sw.js',{scope:'/',updateViaCache:'none'});
@@ -595,26 +698,28 @@ window.updateMercadoApp=async function() {
             navigator.serviceWorker.addEventListener('controllerchange',()=>location.reload(),{once:true});
             registration.waiting.postMessage({type:'ACTIVATE_UPDATE'});
         } else location.reload();
-    } catch(error) {status.textContent='No se pudo actualizar: '+error.message+'. Tus datos siguen guardados.';}
+    } catch(error) {notice('No se pudo actualizar: '+error.message+'. Tus datos siguen guardados.');}
 };
 </script>
-<script src="/static/js/tabs.js?v=365"></script>
-<script src="/static/js/main.js?v=365"></script>
-<script src="/static/js/history.js?v=365"></script>
-<script src="/static/js/offline.js?v=365"></script>
-<script src="/static/js/cart.js?v=365"></script>
-<script src="/static/js/stock.js?v=365"></script>
-<script src="/static/js/shopping.js?v=365"></script>
-<script src="/static/js/availability.js?v=365"></script>
-<script src="/static/js/maps.js?v=365"></script>
-<script src="/static/js/map-products.js?v=365"></script>
-<script src="/static/js/map-sync.js?v=365"></script>
-<script src="/static/js/map-panels.js?v=365"></script>
-<script src="/static/js/map-help.js?v=365"></script>
-<script src="/static/js/map-floating.js?v=365"></script>
-<script src="/static/js/map-selects.js?v=365"></script>
-<script src="/static/js/walk.js?v=365"></script>
-<script src="/static/js/active-branch.js?v=365"></script>
+<script src="/static/js/tabs.js?v=412"></script>
+<script src="/static/js/main.js?v=403"></script>
+<script src="/static/js/history.js?v=375"></script>
+<script src="/static/js/offline.js?v=413"></script>
+<script src="/static/js/cart.js?v=412"></script>
+<script src="/static/js/stock.js?v=411"></script>
+<script src="/static/js/shopping.js?v=409"></script>
+<script src="/static/js/availability.js?v=375"></script>
+<script src="/static/js/map-boundaries.js?v=375"></script>
+<script src="/static/js/maps.js?v=411"></script>
+<script src="/static/js/map-products.js?v=411"></script>
+<script src="/static/js/map-sync.js?v=411"></script>
+<script src="/static/js/map-panels.js?v=375"></script>
+<script src="/static/js/map-help.js?v=375"></script>
+<script src="/static/js/map-floating.js?v=375"></script>
+<script src="/static/js/map-selects.js?v=375"></script>
+<script src="/static/js/price-route.js?v=375"></script>
+<script src="/static/js/walk.js?v=411"></script>
+<script src="/static/js/active-branch.js?v=375"></script>
 
 </html>
 

@@ -3,8 +3,96 @@
     const el=id=>document.getElementById('walk_'+id);
     let map=null,mapBranch='',rows=[],generation=0;
     let organizing=false;
+    let automatic=null,autoMode=false,autoIndex=0,autoSignature='',endpointBranch='';
+    const autoStop=()=>automatic?.stops[autoIndex];
+    function routeSignature(){return JSON.stringify([map,rows.map(row=>[row.id,window.MercadoAvailability.get(mapBranch,row.id).status])]);}
+    function autoMap(){
+        el('auto_start').setAttribute('aria-pressed',String(el('auto_pick').value==='start'));el('auto_end').setAttribute('aria-pressed',String(el('auto_pick').value==='end'));
+        const host=el('auto_map');host.replaceChildren();if(!map)return;
+        const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');svg.setAttribute('viewBox',`-2 -2 ${map.cols*24+4} ${map.rows*24+4}`);
+        const node=(tag,attrs)=>{const n=document.createElementNS(ns,tag);for(const [k,v] of Object.entries(attrs))n.setAttribute(k,v);return n;};
+        svg.setAttribute('role','img');svg.setAttribute('aria-label',automatic?'Camino hasta la próxima parada del recorrido':'Mapa para elegir inicio y final');
+        const defs=node('defs',{}),pattern=node('pattern',{id:'walk-auto-grid',width:24,height:24,patternUnits:'userSpaceOnUse'});
+        pattern.append(node('path',{d:'M24 0H0V24',fill:'none',stroke:'#e6ede8','stroke-width':.7}));defs.append(pattern);svg.append(defs);
+        svg.append(node('rect',{width:map.cols*24,height:map.rows*24,fill:'#f9fbf9'}),node('rect',{width:map.cols*24,height:map.rows*24,fill:'url(#walk-auto-grid)'}));
+        map.cells.forEach((v,i)=>{if(v)svg.append(node('rect',{x:i%map.cols*24+1,y:Math.floor(i/map.cols)*24+1,width:22,height:22,rx:3,fill:'#b9d2c1'}));});
+        if(!automatic)for(const zone of map.shelves){
+            if(zone.cells.length<2)continue;
+            const xs=zone.cells.map(i=>i%map.cols),ys=zone.cells.map(i=>Math.floor(i/map.cols)),x=(Math.min(...xs)+Math.max(...xs)+1)*12,y=(Math.min(...ys)+Math.max(...ys)+1)*12;
+            const name=node('text',{x,y:y+3,'text-anchor':'middle',fill:'#365947','font-size':9,'font-weight':600,'pointer-events':'none'});
+            name.textContent=zone.name.replace(/[&\n]+/g,' · ');
+            const width=(Math.max(...xs)-Math.min(...xs)+1)*24-6;
+            if(name.textContent.length*5>width){name.setAttribute('textLength',width);name.setAttribute('lengthAdjust','spacingAndGlyphs');}svg.append(name);
+        }
+        const center=i=>`${i%map.cols*24+12},${Math.floor(i/map.cols)*24+12}`;
+        if(automatic){const route=[automatic.start,...automatic.stops.flatMap(stop=>stop.path.slice(1)),...automatic.finish.slice(1)];svg.append(node('polyline',{class:'walk-auto-full-path',points:route.map(center).join(' '),fill:'none',stroke:'#cad9d0','stroke-width':3,'stroke-linejoin':'round','stroke-linecap':'round'}));}
+        const path=automatic?(autoStop()?.path||automatic.finish):[];
+        if(path.length)svg.append(node('polyline',{class:'walk-auto-current-path',points:path.map(center).join(' '),fill:'none',stroke:'var(--primary)','stroke-width':4,'stroke-linejoin':'round','stroke-linecap':'round'}));
+        for(const [n,stop] of (automatic?.stops||[]).entries()){
+            const x=stop.cell%map.cols*24+12,y=Math.floor(stop.cell/map.cols)*24+12;
+            svg.append(node('circle',{cx:x,cy:y,r:8.5,fill:n===autoIndex?'var(--primary)':n<autoIndex?'#e8efea':'#fff',stroke:n===autoIndex?'var(--primary)':'#95b39f','stroke-width':1}));
+            const text=node('text',{x,y:y+3,'text-anchor':'middle',fill:n===autoIndex?'#fff':'#365947','font-size':9,'font-weight':700});text.textContent=n+1;svg.append(text);
+        }
+        window.MercadoBoundaries.svg(svg,map,24);
+        for(const [prefix,color,text] of [['s','#176b58','I'],['e','#b07136','F']]){const r=Number(el('auto_'+prefix+'r').value)-1,c=Number(el('auto_'+prefix+'c').value)-1;if(Number.isInteger(r)&&Number.isInteger(c)&&r>=0&&r<map.rows&&c>=0&&c<map.cols&&!map.cells[r*map.cols+c]){svg.append(node('circle',{cx:c*24+12,cy:r*24+12,r:10,fill:color,stroke:'#fff','stroke-width':2}));const label=node('text',{x:c*24+12,y:r*24+16,'text-anchor':'middle',fill:'white','font-size':11,'font-weight':700});label.textContent=text;svg.append(label);}}
+        svg.onclick=event=>{if(automatic)return;const point=new DOMPoint(event.clientX,event.clientY).matrixTransform(svg.getScreenCTM().inverse()),x=Math.floor(point.x/24),y=Math.floor(point.y/24);if(x<0||y<0||x>=map.cols||y>=map.rows)return;if(map.cells[y*map.cols+x]){notice('Elegí un cuadrado libre para caminar.');return;}const prefix=el('auto_pick').value==='start'?'s':'e';el('auto_'+prefix+'r').value=y+1;el('auto_'+prefix+'c').value=x+1;el('auto_pick').value=prefix==='s'?'end':'start';el('auto_status').textContent='';saveEndpoints();autoMap();};
+        el('auto_map_hint').textContent=automatic?(autoStop()?'Camino a tu próxima parada':'Camino al final'):'Marcando '+(el('auto_pick').value==='start'?'inicio':'final');
+        host.append(svg);
+    }
+    function saveEndpoints(){try{sessionStorage.setItem('mercado-price-endpoints:'+mapBranch,JSON.stringify(['sr','sc','er','ec'].map(key=>el('auto_'+key).value)));}catch(_){} }
+    function autoRefresh(){
+        el('auto_start').closest('.walk-endpoint-buttons').hidden=!!automatic;el('auto_calculate').disabled=!map;for(const key of ['sr','sc','er','ec','pick','start','end'])el('auto_'+key).disabled=!!automatic||!map;
+        el('auto_toggle').checked=autoMode;el('auto_toggle').disabled=!map;el('auto').hidden=!autoMode;
+        for(const key of ['live','metrics','navigation'])el('auto_'+key).hidden=!automatic;
+        el('auto_previous').disabled=autoIndex===0;el('auto_next').disabled=!!automatic&&autoIndex>=automatic.stops.length;
+        el('auto_pending').hidden=!el('auto_warnings').children.length;
+        const pendingCount=el('auto_warnings').children.length;el('auto_pending_count').textContent=pendingCount+(pendingCount===1?' específico pendiente':' específicos pendientes');
+        if(automatic){
+            const stop=autoStop(),zone=map.shelves.find(z=>z.id===stop?.zone),complete=!stop;
+            el('auto_phase').textContent=complete?'Revisión terminada':'En recorrido';
+            el('auto_destination').textContent=complete?'Todo revisado':label(zone);
+            if(complete&&automatic.missing.length+automatic.unreachable.length)el('auto_destination').textContent='Recorrido terminado';
+            el('auto_stop_detail').textContent=stop?'Cuadrado '+([...zone.cells].sort((a,b)=>a-b).indexOf(stop.cell)+1)+' · '+stop.items.length+(stop.items.length===1?' específico':' específicos'):'Seguí el camino hasta el punto final.';
+            el('auto_stop_badge').textContent=complete?'✓':String(autoIndex+1).padStart(2,'0')+' / '+String(automatic.stops.length).padStart(2,'0');
+            const progress=automatic.stops.length?Math.round(autoIndex/automatic.stops.length*100):100;
+            el('auto_progress').setAttribute('aria-valuenow',String(progress));el('auto_progress').setAttribute('aria-valuetext',autoIndex+' de '+automatic.stops.length+' paradas revisadas');el('auto_progress_fill').style.width=progress+'%';
+            el('auto_total_stops').textContent=automatic.stops.length;el('auto_total_items').textContent=automatic.stops.reduce((n,s)=>n+s.items.length,0);el('auto_total_steps').textContent=automatic.total;
+            el('auto_status').textContent='';el('auto_next').textContent=complete?'Revisión terminada':autoIndex===automatic.stops.length-1?'Finalizar revisión →':'Cuadrado revisado →';
+        }
+        autoMap();
+    }
+    function autoNavigate(){const stop=autoStop();el('zone').value=stop?.zone||'';el('route_complete').hidden=true;cards();autoRefresh();}
+    el('auto_calculate').onclick=async()=>{
+        if(!map)return;
+        if(orderDrafts.size){notice('Guardá o descartá los cambios de orden antes de calcular.');return;}
+        try{const point=prefix=>{const r=Number(el('auto_'+prefix+'r').value),c=Number(el('auto_'+prefix+'c').value);if(!Number.isInteger(r)||!Number.isInteger(c)||r<1||c<1||r>map.rows||c>map.cols)throw Error('Las coordenadas deben estar dentro del mapa.');return (r-1)*map.cols+c-1;};
+            const available=rows.filter(row=>window.MercadoAvailability.get(mapBranch,row.id).status==='available');
+            const planned=window.MercadoPricePlanner.plan(map,available,point('s'),point('e'));
+            automatic=planned;autoIndex=0;autoSignature=routeSignature();organizing=false;updateOrganize();saveEndpoints();
+            el('auto_warnings').replaceChildren();for(const [title,items] of [['Sin cuadrado asignado',planned.missing],['Sin acceso desde el inicio',planned.unreachable]])for(const item of items){const li=document.createElement('li');li.textContent=title+': '+(item.product_all||productLabel(item));el('auto_warnings').append(li);}
+            await setPricesMode(true);autoNavigate();
+        }catch(error){notice(error.message);}
+    };
+    async function exitAutomatic(){automatic=null;autoMode=false;el('auto_status').textContent='';await setPricesMode(false);autoRefresh();cards();notice('Recorrido automático cerrado.');}
+    el('auto_restart').onclick=async()=>{
+        if(!automatic)return;
+        // Solo reiniciar las marcas de esta ruta: los precios guardados se conservan.
+        for(const stop of automatic.stops){
+            const reviewed=reviewedProducts(stop.zone);
+            for(const item of stop.items)reviewed.ids.delete(item.id);
+            try{sessionStorage.setItem(reviewed.key,JSON.stringify([...reviewed.ids]));}catch(_){}
+        }
+        automatic=null;autoIndex=0;el('zone').value='';el('auto_pick').value='start';
+        el('auto_status').textContent='';el('auto_warnings').replaceChildren();el('auto_pending').open=false;
+        await setPricesMode(false);autoRefresh();cards();el('auto_start').focus({preventScroll:true});
+    };
+    el('auto_toggle').onchange=async()=>{if(!el('auto_toggle').checked){await exitAutomatic();return;}autoMode=true;el('auto_status').textContent='';autoRefresh();cards();};
+    el('auto_previous').onclick=()=>{if(autoIndex>0){autoIndex--;autoNavigate();}};
+    el('auto_next').onclick=()=>{const stop=autoStop();if(!stop)return;const reviewed=reviewedProducts();for(const item of stop.items)reviewed.ids.add(item.id);try{sessionStorage.setItem(reviewed.key,JSON.stringify([...reviewed.ids]));}catch(_){}autoIndex++;autoNavigate();};
+    for(const [key,value] of [['start','start'],['end','end']])el('auto_'+key).onclick=()=>{el('auto_pick').value=value;autoMap();};
     function updateOrganize(){document.documentElement.classList.toggle('walk-organize-mode',organizing);el('organize_toggle').setAttribute('aria-pressed',String(organizing));}
     window.setWalkOrganize=async()=>{
+        if(automatic){notice('Salí del recorrido automático para organizar ubicaciones.');return;}
         const next=!organizing;
         if(next){await setPricesMode(false);await setHistoryMode(false);}
         organizing=next;updateOrganize();cards();
@@ -31,13 +119,13 @@
     }
     el('order_save').onclick=async()=>{
         const key=draftKey(),draft=orderDrafts.get(key);if(!draft)return;
-        if(!window.mercadoMapProducts.saveOrder(mapBranch,el('zone').value,draft.base,draft.placements)){el('order_status').textContent='El mapa cambió o no se pudo guardar. Tus cambios siguen aquí; descartalos para cargar el orden vigente.';return;}
-        orderDrafts.delete(key);await openWalk();el('order_status').textContent='Cambios guardados. Se sincronizarán con los otros dispositivos.';
+        if(!window.mercadoMapProducts.saveOrder(mapBranch,el('zone').value,draft.base,draft.placements)){notice('El mapa cambió o no se pudo guardar. Tus cambios siguen aquí; descartalos para cargar el orden vigente.');return;}
+        orderDrafts.delete(key);await openWalk();notice('Cambios guardados. Se sincronizarán con los otros dispositivos.', {success:true});
     };
     el('order_discard').onclick=()=>{orderDrafts.delete(draftKey());el('order_status').textContent='';cards();};
     const reviewedByZone=new Map();
-    function reviewedProducts(){
-        const key='mercado-walk-reviewed-v1:'+mapBranch+':'+el('zone').value;
+    function reviewedProducts(zone=el('zone').value){
+        const key='mercado-walk-reviewed-v1:'+mapBranch+':'+zone;
         if(!reviewedByZone.has(key)){
             let saved=[];try{const value=JSON.parse(sessionStorage.getItem(key)||'[]');if(Array.isArray(value))saved=value.filter(id=>typeof id==='string');}catch(_){}
             reviewedByZone.set(key,new Set(saved));
@@ -45,9 +133,10 @@
         return {key,ids:reviewedByZone.get(key)};
     }
     function directionKey(){return 'mercado-walk-direction:'+mapBranch+':'+el('zone').value;}
-    function isReverse(){try{const saved=sessionStorage.getItem(directionKey());return saved?saved==='reverse':map?.shelves.find(zone=>zone.id===el('zone').value)?.entry==='last';}catch(_){return map?.shelves.find(zone=>zone.id===el('zone').value)?.entry==='last';}}
+    function isReverse(){if(automatic)return false;try{const saved=sessionStorage.getItem(directionKey());return saved?saved==='reverse':map?.shelves.find(zone=>zone.id===el('zone').value)?.entry==='last';}catch(_){return map?.shelves.find(zone=>zone.id===el('zone').value)?.entry==='last';}}
     function setDirection(reverse){try{sessionStorage.setItem(directionKey(),reverse?'reverse':'forward');}catch(_){}cards();}
     function chooseSection(id){
+        if(automatic)return;
         const zone=map?.shelves.find(zone=>zone.id===id);if(!zone)return;
         el('zone').value=id;try{sessionStorage.setItem(directionKey(),zone.entry==='last'?'reverse':'forward');}catch(_){}
         el('route_complete').hidden=true;el('order_status').textContent='';cards();
@@ -82,15 +171,17 @@
     const label=zone=>zone.name.replace(/[&\n]+/g,' · ');
     function cards(){
         const zone=map?.shelves.find(z=>z.id===el('zone').value);
-        el('products').hidden=!zone;el('controls').hidden=true;el('zones').hidden=!!zone||!map?.shelves.length;el('status').hidden=!!zone;el('change').hidden=true;el('map').hidden=!!zone||!map;el('back_map').hidden=!zone||document.getElementById('panel-walk').hidden;document.getElementById('products_floating_menu').classList.toggle('has-map-back',!!zone&&!document.getElementById('panel-walk').hidden);
+        el('products').hidden=!zone||(autoMode&&!automatic);el('controls').hidden=true;el('zones').hidden=autoMode||!!zone||!map?.shelves.length;el('status').hidden=autoMode||!!zone;el('change').hidden=true;el('map').hidden=autoMode||!!zone||!map;el('back_map').hidden=!zone||document.getElementById('panel-walk').hidden;document.getElementById('products_floating_menu').classList.toggle('has-map-back',!!zone&&!document.getElementById('panel-walk').hidden);
         el('cards').replaceChildren();el('cards').classList.remove('product-highlighted');
+        el('route').hidden=!!automatic;el('previous_section').parentElement.hidden=!!automatic;
         if(!zone)return;
-        el('title').textContent='Productos · '+label(zone);
+        el('title').textContent=automatic?'Precios de esta parada':'Productos · '+label(zone);
         const placements=organizing?(orderDrafts.get(draftKey())?.placements||map.placements):map.placements;el('order_changes').hidden=!organizing||!orderDrafts.has(draftKey());
         const sectionIndex=map.shelves.findIndex(item=>item.id===zone.id);el('section_progress').textContent=(sectionIndex+1)+' / '+map.shelves.length;el('previous_section').disabled=sectionIndex===0;el('next_section').disabled=false;el('next_section').textContent=sectionIndex===map.shelves.length-1?'Terminar recorrido ✓':'Siguiente sección →';
         routeMap(zone);
         const available=window.MercadoAvailability.forBranch(mapBranch);
-        const assigned=rows.filter(row=>map.assignments[row.id]===zone.id&&available[row.id]?.status==='available');
+        const stop=autoStop();
+        const assigned=rows.filter(row=>map.assignments[row.id]===zone.id&&available[row.id]?.status==='available'&&(!automatic||stop?.items.some(item=>item.id===row.id)));
         const reviewed=reviewedProducts();
         const visible=assigned.slice().sort((a,b)=>Number(reviewed.ids.has(a.id))-Number(reviewed.ids.has(b.id)));
         visible.sort((a,b)=>{
@@ -107,41 +198,9 @@
             const isReviewed=reviewed.ids.has(row.id);card.classList.toggle('walk-reviewed',isReviewed);
             if(isReviewed){card.style.setProperty('--card-background','#e7e9e8','important');card.style.setProperty('--card-ink','#626a66','important');}
             const title=document.createElement('strong');title.textContent=row.product_all||productLabel(row);
-        const price=document.createElement('div');price.className='product-last-price';
-        const best=row.best_price;
-        const value=best?.price ?? row.last_price ?? row.normal_price;
-        price.textContent=value==null ? 'Sin precio registrado' : formatProductPrice(value);
-        if(value!=null && row.sale_mode==='fractional') price.textContent+='/'+(row.content_unit==='g' ? 'kg' : 'litro');
-        const unitPrice=value==null || row.sale_mode==='fractional' ? '' : productUnitPrice(row,value);
-        if(unitPrice) {
-            const normalized=document.createElement('span');normalized.className='product-unit-price';
-            const multiPack=row.sale_mode==='package' && row.content_unit==='unit' && Number(row.package_content)>1;
-            if(multiPack) {
-                normalized.classList.add('product-pack-unit-price');
-                normalized.textContent=unitPrice.replace('/unidad',' por unidad');
-            } else normalized.textContent=' ('+unitPrice+')';
-            price.append(normalized);
-        }
-        const caption=document.createElement('div');caption.className='product-price-caption';
-        const date=best?.date || row.last_price_date || row.normal_date;
-        if(value!=null && date) {
-            const age=Math.max(0,priceAgeDays(date));
-            if(Number.isFinite(age)) {
-                price.dataset.freshness=age<=7?'fresh':age<=14?'recent':'old';
-                price.title='Precio registrado hace '+age+' día'+(age===1?'':'s');
-                price.setAttribute('aria-label',formatProductPrice(value)+'. '+price.title);
-            }
-        }
-        caption.textContent='';
-        const market=best ? best.market : row.last_price_market,conditions=best ? best.conditions : row.last_price_conditions;
-        if(market)caption.textContent=market;
-        if(date){const days=Math.max(0,priceAgeDays(date));caption.textContent+=(caption.textContent?' · ':'')+days+(days===1?' día':' días');}
-        if(conditions && conditions!=='none')caption.textContent+=' · '+conditions.replace('offer','Oferta').replace('2_50%','Segunda al 50%').replace('2_80%','Segunda al 80%').replace('special','Promoción especial');
-        const description=best ? best.description : row.last_price_description;
-        if(description)caption.textContent+=' · '+description;
-        else if(best?.promotion && !conditions)caption.textContent+=' · Promoción';
-        if(best ? best.pending : row.last_price_pending) caption.textContent+=' · Pendiente de sincronizar';
-        if(value==null) caption.textContent='';
+        const {price,caption,recentBest}=renderProductPrice(row);
+        const secondPrice=renderSecondProductPrice(row);
+        const normalReference = renderNormalProductPrice(row, caption, secondPrice);
             const actions=document.createElement('div');actions.className='product-row-actions';
             const button=document.createElement('button');button.type='button';button.textContent='Opciones';button.setAttribute('aria-label','Ver acciones de '+productLabel(row));button.onclick=async()=>{await showProductActions(row.id);back.hidden=false;};
             const cart=document.createElement('button');cart.type='button';cart.className='product-cart-button';cart.title='Agregar al carrito';cart.setAttribute('aria-label','Agregar al carrito');
@@ -179,7 +238,11 @@
             const squareField=document.createElement('label');squareField.className='walk-organize-square';squareField.textContent='Cuadrado';
             const square=document.createElement('select');square.setAttribute('aria-label','Cuadrado de '+productLabel(row));square.add(new Option('Sin cuadrado',''));[...zone.cells].sort((a,b)=>a-b).forEach((cell,index)=>square.add(new Option('Cuadrado '+(index+1),String(cell))));square.value=position?String(position.cell):'';square.onchange=()=>changeSquare(row.id,square.value===''?null:Number(square.value));squareField.append(square);
             if(organizing){card.append(orderControls);actions.classList.add('history-hidden-actions');}
-            card.append(title,price,caption);
+            card.classList.toggle('has-second-price',Boolean(secondPrice));card.append(title,price);
+            if (recentBest) card.append(recentBest);
+            card.append(caption);
+            if(secondPrice)card.append(secondPrice);
+            if (normalReference) card.append(normalReference);
             if(organizing){
                 card.append(squareField);
                 const unavailable=document.createElement('button');unavailable.type='button';unavailable.className='walk-unavailable';unavailable.textContent='No disponible en este súper';unavailable.setAttribute('aria-label','Marcar no disponible: '+productLabel(row));
@@ -187,10 +250,10 @@
                     const branch=mapBranch,previous=window.MercadoAvailability.get(branch,row.id).status;unavailable.disabled=true;
                     try{
                         await window.MercadoAvailability.set(branch,[row.id],'unavailable');
-                        el('order_status').textContent=productLabel(row)+' marcado como no disponible. Se sincronizará automáticamente. ';
+                        notice(productLabel(row)+' marcado como no disponible. Se sincronizará automáticamente.', {success:true});
                         const undo=document.createElement('button');undo.type='button';undo.className='walk-availability-undo';undo.textContent='Deshacer';
-                        undo.onclick=async()=>{undo.disabled=true;try{await window.MercadoAvailability.set(branch,[row.id],previous);el('order_status').textContent='Disponibilidad restaurada.';}catch(error){undo.disabled=false;el('order_status').append(' No se pudo restaurar: '+error.message);}};el('order_status').append(undo);
-                    }catch(error){unavailable.disabled=false;el('order_status').textContent='No se pudo guardar la disponibilidad: '+error.message;}
+                        undo.onclick=async()=>{undo.disabled=true;try{await window.MercadoAvailability.set(branch,[row.id],previous);undo.remove();notice('Disponibilidad restaurada.', {success:true});}catch(error){undo.disabled=false;notice('No se pudo restaurar: '+error.message);}};el('order_status').replaceChildren(undo);
+                    }catch(error){unavailable.disabled=false;notice('No se pudo guardar la disponibilidad: '+error.message);}
                 };card.append(unavailable);
             }
             card.append(actions);if(historyMode)card.append(renderPriceHistory(row));el('cards').append(card);
@@ -222,15 +285,21 @@
             const button=document.createElement('button');button.type='button';button.textContent=label(zone);button.title=label(zone);button.style.borderLeftColor=zone.color;button.onclick=choose;zones.append(button);
             group.onclick=choose;group.onkeydown=e=>{if(['Enter',' '].includes(e.key)){e.preventDefault();choose();}};svg.append(group);
         }
+        window.MercadoBoundaries.svg(svg,map,24);
         host.append(svg);
     }
     function loadMap(){
         map=null;mapBranch=el('branch').value;el('zone').replaceChildren(new Option('Tocá una zona del mapa',''));
         try{const raw=localStorage.getItem('mercado-branch-map-v1:'+el('branch').value);if(raw)map=window.mercadoMapProducts.validate(JSON.parse(raw));}catch(_){el('status').textContent='No se pudo abrir el mapa guardado.';}
         if(map)for(const zone of map.shelves)el('zone').add(new Option(label(zone),zone.id));
+        if(endpointBranch!==mapBranch){endpointBranch=mapBranch;automatic=null;autoMode=false;el('auto_warnings').replaceChildren();el('auto_status').textContent='';try{const saved=JSON.parse(sessionStorage.getItem('mercado-price-endpoints:'+mapBranch));['sr','sc','er','ec'].forEach((key,i)=>el('auto_'+key).value=saved?.[i]||1);}catch(_){} }
+        if(automatic&&autoSignature!==routeSignature()){automatic=null;el('auto_status').textContent='Cambiaron el mapa o los productos disponibles. Volvé a calcular.';el('auto_warnings').replaceChildren();}
+        if(autoStop())el('zone').value=autoStop().zone;
+        autoRefresh();
         el('status').textContent=!el('branch').value?'Elegí un supermercado con el botón S de la barra superior para ver su mapa.':!map||!map.shelves.length?'Esta sucursal todavía no tiene zonas. Podés crearlas en Mapa.':'Tocá la zona donde estás para ver sus productos.';
         draw();cards();
     }
+    document.addEventListener('mercado-catalog-change',event=>{rows=event.detail.rows;if(!document.getElementById('panel-walk').hidden)cards();});
     async function refreshCards(){const catalog=await catalogWithPrices();rows=catalog;cards();}
     document.addEventListener('mercado-module-leave',event=>{if(event.detail.id==='walk'){organizing=false;updateOrganize();el('order_status').textContent='';cards();}});
     document.addEventListener('mercado-catalog-mode-change',()=>{if(pricesMode||historyMode){organizing=false;updateOrganize();}cards();});
@@ -245,7 +314,8 @@
     document.addEventListener('mercado-active-branch-change',()=>{if(el('branch').value!==window.mercadoActiveBranch){void openWalk();}});
     el('zone').onchange=cards;
     el('back_map').onclick=()=>el('change').click();
-    el('change').onclick=()=>{
+    el('change').onclick=async()=>{
+        if(automatic)await exitAutomatic();
         el('zone').value='';el('route_complete').hidden=true;cards();el('status').textContent='Tocá la zona donde estás.';el('zones').querySelector('button')?.focus({preventScroll:true});
         requestAnimationFrame(()=>{
             const bounds=el('map').getBoundingClientRect(),screen=window.visualViewport;
@@ -270,6 +340,6 @@
         };
     };
     const back=document.createElement('button');back.type='button';back.className='walk-return';back.textContent='Volver a Recorrer';back.hidden=true;back.onclick=()=>{if(window.productActionReturn)void window.productActionReturn();else{back.hidden=true;showModule('walk');}};document.getElementById('panel-products').prepend(back);
-    document.addEventListener('mercado-availability-change',cards);
+    document.addEventListener('mercado-availability-change',()=>{if(automatic)void openWalk();else cards();});
     document.addEventListener('mercado-map-change',()=>{if(!document.getElementById('panel-walk').hidden)void openWalk();});
 })();

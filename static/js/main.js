@@ -39,6 +39,36 @@ function adjustedPrice(value, subtractCent) {
     if (subtractCent && price < 100n) throw new Error('El precio no permite restar $0,01');
     return decimalText(price - (subtractCent ? 100n : 0n), 4);
 }
+const priceCentCheckboxes = {
+    price: 'checkbox_99',
+    shelf_price: 'shelf_subtract_cent',
+    compare_product_reference: 'checkbox_compare_a_9_99',
+    new_price: 'checkbox_new_price_9_99',
+    new_fractional_price: 'new_fractional_subtract_cent'
+};
+function branchDefaultsToSubtractCent(branchField='purchase_branch') {
+    const option = document.getElementById(branchField).selectedOptions[0];
+    const name = option?.value ? option.textContent.split(' · ', 1)[0] : '';
+    return /\bgomez\s+pardo\b/i.test(name.normalize('NFD').replace(/\p{Diacritic}/gu, ''));
+}
+function applyPriceCentDefault(priceId) {
+    const price = document.getElementById(priceId);
+    const checkbox = document.getElementById(priceCentCheckboxes[priceId]);
+    const comparison = priceId === 'new_price' || priceId === 'compare_product_reference';
+    const branchField = priceId === 'shelf_price' ? 'shelf_branch' : 'purchase_branch';
+    checkbox.defaultChecked = checkbox.checked = !(comparison && checkbox.disabled)
+        && !price.hasAttribute('data-exact-price') && branchDefaultsToSubtractCent(branchField);
+}
+function resetPriceCent(priceId, exactPrice=false) {
+    document.getElementById(priceId).toggleAttribute('data-exact-price', exactPrice);
+    applyPriceCentDefault(priceId);
+}
+for (const priceId of Object.keys(priceCentCheckboxes)) {
+    const price = document.getElementById(priceId);
+    price.addEventListener('input', () => {
+        if (price.hasAttribute('data-exact-price')) resetPriceCent(priceId);
+    });
+}
 function fractionalPurchaseValues(priceValue,totalValue,subtractCent=false) {
     const price=adjustedPrice(priceValue,subtractCent),unitPrice=scaledDecimal(price,4,true);
     const total_paid=decimalInput(totalValue,4,true);
@@ -91,7 +121,9 @@ function purchaseAmounts(product) {
     let total;
     if(input('purchase_total').value) total=scaledDecimal(input('purchase_total').value,4);
     else {
-        const unit=scaledDecimal(adjustedPrice(input('price').value || product.normal_price,input('checkbox_99').checked),4);
+        const enteredPrice = input('price').value;
+        const subtractCent = input('checkbox_99').checked && (Boolean(enteredPrice) || !branchDefaultsToSubtractCent());
+        const unit=scaledDecimal(adjustedPrice(enteredPrice || product.normal_price,subtractCent),4);
         if(['none','offer'].includes(code)) total=roundedDivide(unit*q,1000000n);
         else {
             if(q%1000000n!==0n) throw new Error('Esta promoción requiere una cantidad entera de envases o unidades');
@@ -221,7 +253,7 @@ function compare_prices() {
         document.getElementById('purchase_total').value = decimalText(total,4);
         document.getElementById('quantity').value = units.toString();
         document.getElementById('checkbox_quantity_1_1000').checked = false;
-        document.getElementById('checkbox_99').checked = false;
+        resetPriceCent('price', true);
         setPurchasePromotion(selected?.id || 'none');
         if(special) {
             document.getElementById('purchase_special_quantity').value=special.units.toString();
@@ -250,7 +282,6 @@ function another_similar_product() {
 function clearComparison() {
     comparison_product=null;
     document.getElementById('compare_register_shelf').hidden=true;
-    document.getElementById('checkbox_compare_a_9_99').checked=false;
     document.getElementById('compare_promotions_enabled').checked=false;
     document.getElementById('compare_promotions').hidden=true;
     document.getElementById('compare_product_label').textContent='Presentación A';
@@ -258,6 +289,8 @@ function clearComparison() {
     document.getElementById('compare_product_reference').value='';
     document.getElementById('compare_product_content').value='';
     for (const id of ['new_price','new_presentation','purchase_total']) document.getElementById(id).value = '';
+    resetPriceCent('compare_product_reference');
+    resetPriceCent('new_price');
     document.getElementById('comparison_result').textContent = '';
     document.querySelectorAll('input[name="promotion"]').forEach(input => input.checked = false);
     for(const name of ['quantity','total','description']) document.getElementById('compare_special_'+name).value='';
@@ -299,8 +332,10 @@ function updateComparisonCentCheckbox() {
             const amount=scaledDecimal(document.getElementById(inputId).value,4,true);
             enabled=amount%100000n===0n && (inputId!=='new_price' || !document.getElementById('special').checked);
         } catch(_) {}
+        const wasDisabled = checkbox.disabled;
         checkbox.disabled=!enabled;
         if(!enabled) checkbox.checked=false;
+        else if(wasDisabled) applyPriceCentDefault(inputId);
         checkbox.title=enabled ? 'Restar $0,01 para obtener un precio terminado en 9,99' : 'Disponible cuando el precio es un múltiplo de 10, como 1000 o 1950';
     }
 }
@@ -325,6 +360,9 @@ function updateSpecialPromotion() {
     document.getElementById('compare_special_fields').hidden=!compare;document.getElementById('new_price').disabled=compare;
     document.getElementById('shelf_special_fields').hidden=!shelf;document.getElementById('shelf_price').disabled=shelf;
     document.getElementById('shelf_subtract_cent').disabled=shelf;
+    const description=document.getElementById('shelf_special_description');
+    description.hidden=document.getElementById('shelf_promotion').value==='none';
+    description.placeholder=shelf ? 'Descripción de la oferta' : 'Descripción de la oferta (opcional)';
     updateComparisonCentCheckbox();
 }
 document.querySelectorAll('input[name="promotion"]').forEach(input=>input.addEventListener('change',updateSpecialPromotion));
@@ -334,7 +372,8 @@ function reset_form() {
     document.getElementById('purchase_product_label').textContent='Seleccioná un producto';
     if (!document.getElementById('checkbox_market').checked) document.getElementById('market').value = '';
     document.getElementById('quantity').value = '1';
-    for (const id of ['checkbox_quantity_1_1000','checkbox_99']) document.getElementById(id).checked = false;
+    document.getElementById('checkbox_quantity_1_1000').checked = false;
+    resetPriceCent('price');
     setPurchasePromotion('none');
     for(const name of ['quantity','total','description']) document.getElementById('purchase_special_'+name).value='';
     updatePurchasePromotion(false);

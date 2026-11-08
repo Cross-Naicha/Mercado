@@ -10,7 +10,7 @@
         const current=api.context().branch;el('conflict').hidden=!conflicts.has(current);
         if(conflicts.size)el('status').textContent='Hay '+conflicts.size+' mapa(s) con cambios de otro dispositivo. Elegí la sucursal para resolverlos.';
     }
-    const empty=value=>!value.cells.some(Boolean)&&!value.shelves.length&&!Object.keys(value.assignments||{}).length;
+    const empty=value=>!value.cells.some(Boolean)&&!value.shelves.length&&!Object.keys(value.assignments||{}).length&&!(value.walls||[]).length&&!Object.keys(value.access||{}).length;
     function backup(id,value){localStorage.setItem('mercado-map-backup:'+id+':'+Date.now(),JSON.stringify(value));}
     function canReceive(id){
         if(api.context().branch!==id)return true;
@@ -21,7 +21,7 @@
         try {
             const response=await serverRequest('/api/maps');
             if(!Array.isArray(response.maps))throw Error('Respuesta de mapas inválida');
-            if(!response.features?.includes('placements')||!response.features?.includes('region_entry'))throw Error('El servidor necesita reiniciarse para guardar cuadrados y extremos de entrada. Tus cambios locales se conservan');
+            if(!response.features?.includes('placements')||!response.features?.includes('region_entry')||!response.features?.includes('boundaries'))throw Error('El servidor necesita reiniciarse para guardar límites y accesos. Tus cambios locales se conservan');
             const remote=new Map(response.maps.map(r=>[r.branch_id,r]));
             const ids=new Set(remote.keys());
             for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k.startsWith(prefix)&&/^[0-9a-f-]{36}$/i.test(k.slice(prefix.length)))ids.add(k.slice(prefix.length));}
@@ -59,11 +59,12 @@
                 const result=await serverRequest('/api/maps/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({expected_revision:remote.revision,map:JSON.parse(local)})});
                 acknowledge(id,result.revision,local);
             }else{
-                if(!canReceive(id)){el('status').textContent='Terminá o cancelá la selección y la edición de etiquetas antes de cargar la versión del servidor.';return;}
+                if(!canReceive(id)){notice('Terminá o cancelá la selección y la edición de etiquetas antes de cargar la versión del servidor.');return;}
                 backup(id,JSON.parse(raw));const server=encode(remote.map);localStorage.setItem(api.storageKey(id),server);acknowledge(id,remote.revision,server);api.receive(id,JSON.parse(server));
             }
-            conflicts.delete(id);showConflicts();el('status').textContent='Versión elegida guardada. Se conservó un respaldo local de la otra versión.';
-        }catch(error){el('status').textContent='No se pudo resolver: '+error.message+'. Las versiones se conservan.';}
+            conflicts.delete(id);showConflicts();if(!conflicts.size)el('status').textContent='';
+            notice('Versión elegida guardada. Se conservó un respaldo local de la otra versión.', {success:true});
+        }catch(error){notice('No se pudo resolver: '+error.message+'. Las versiones se conservan.');}
         finally{running=false;}
     }
     window.MercadoMapSync={sync};el('local').onclick=()=>resolve(true);el('remote').onclick=()=>resolve(false);

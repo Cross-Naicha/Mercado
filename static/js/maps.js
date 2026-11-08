@@ -3,7 +3,7 @@
     const el=id=>document.getElementById('map_'+id),canvas=el('canvas'),ctx=canvas.getContext('2d');
     const palette=['#0f7a66','#449b52','#216348','#79b86b','#368b80','#a0c785'];
     let selecting=false,readOnly=false,activeShelf=null,drawingZoom='1',assignmentZone=null,assignmentCell=null;
-    let mode='draw',selection=null,selectionStart=null;
+    let mode='draw',selection=null,selectionStart=null,probeStart=null,probePath=[];
     let map=null,branch='',visited=new Set(),history=[],drawing=false,last=null,changed=false,cursor={x:0,y:0};
     const zoneEdits=new Map();
     const key=id=>'mercado-branch-map-v1:'+id;
@@ -22,25 +22,27 @@
         const placements=value.placements??{};
         if(!placements||typeof placements!=='object'||Array.isArray(placements)||Object.values(placements).some(p=>!p||!Number.isInteger(p.cell)||p.cell<0||p.cell>16383||!Number.isInteger(p.order)||p.order<0||p.order>100000))throw Error('Ubicaciones de productos inválidas');
         const validPlacements=Object.fromEntries(Object.entries(placements).filter(([id,p])=>shelves.find(g=>g.id===assignments[id])?.cells.includes(p.cell)));
-        return {placements:validPlacements,nextLetters:{...nextLetters},assignments:Object.fromEntries(Object.entries(assignments).filter(([,zone])=>zoneIds.has(zone))),nextZone:Math.max(Number.isSafeInteger(value.nextZone)&&value.nextZone>0?value.nextZone:1,...shelves.map(g=>{const match=/^Zona (\d+)$/.exec(g.name);return match?Number(match[1])+1:1;})),shelves:shelves.map((g,i)=>({id:g.id,name:g.name,orientation:g.orientation||'horizontal',entry:g.entry||'first',color:g.color||palette[i%palette.length],cells:[...g.cells]})),version:2,rows:value.rows,cols:value.cols,precision:value.precision,cells:[...value.cells]};
+        return {...window.MercadoBoundaries.validate(value),placements:validPlacements,nextLetters:{...nextLetters},assignments:Object.fromEntries(Object.entries(assignments).filter(([,zone])=>zoneIds.has(zone))),nextZone:Math.max(Number.isSafeInteger(value.nextZone)&&value.nextZone>0?value.nextZone:1,...shelves.map(g=>{const match=/^Zona (\d+)$/.exec(g.name);return match?Number(match[1])+1:1;})),shelves:shelves.map((g,i)=>({id:g.id,name:g.name,orientation:g.orientation||'horizontal',entry:g.entry||'first',color:g.color||palette[i%palette.length],cells:[...g.cells]})),version:2,rows:value.rows,cols:value.cols,precision:value.precision,cells:[...value.cells]};
     }
     function status(message) {el('status').textContent=message;}
     function save() {
         const ids=new Set(map.shelves.map(g=>g.id));map.assignments=Object.fromEntries(Object.entries(map.assignments||{}).filter(([,zone])=>ids.has(zone)));
+        map.access=Object.fromEntries(Object.entries(map.access||{}).filter(([cell])=>map.cells[cell]===1));
         map.placements=Object.fromEntries(Object.entries(map.placements||{}).filter(([id,p])=>map.shelves.find(g=>g.id===map.assignments[id])?.cells.includes(p.cell)));
-        try {localStorage.setItem(key(branch),JSON.stringify(map));status('Mapa guardado en este dispositivo.');document.dispatchEvent(new Event('mercado-map-saved'));return true;}
-        catch (_) {status('No se pudo guardar. Exportá el mapa antes de salir.');return false;}
+        try {localStorage.setItem(key(branch),JSON.stringify(map));notice('Mapa guardado en este dispositivo.', {success:true});document.dispatchEvent(new Event('mercado-map-saved'));return true;}
+        catch (_) {notice('No se pudo guardar. Exportá el mapa antes de salir.');return false;}
     }
-    function remember() {history.push(JSON.stringify(map));if(history.length>25)history.shift();}
+    function remember() {probeStart=null;probePath=[];history.push(JSON.stringify(map));if(history.length>25)history.shift();}
     function render() {
         const enabled=!!map;
         for(const id of ['undo','refine','zoom','export','import','expand','side','count','position','mode','reduce','reduce_side','reduce_count','reduce_content'])el(id).disabled=!enabled;
         el('clear_zones').disabled=!enabled||!map.shelves.length;
         el('undo').disabled=!enabled||!history.length;el('refine').disabled=!enabled||(map.rows*2>128||map.cols*2>128||map.precision>=8);
-        el('viewport').hidden=!enabled;el('naming').hidden=!enabled||mode!=='name';
+        el('viewport').hidden=!enabled;el('naming').hidden=!enabled||mode!=='name'||el('boundary_mode').value!=='off';
         el('name_save').disabled=!enabled||!selectedCells().length;
         el('selection_count').textContent=selectedCells().length+' celdas seleccionadas';
         renderShelfList();
+        el('boundary_tools').hidden=readOnly;el('boundary_mode').disabled=!enabled;el('boundary_side').disabled=!enabled;el('boundary_zone').disabled=!enabled;
         updateSeriesPreview();
         document.dispatchEvent(new Event("mercado-map-change"));
         if(!enabled){el('resolution').textContent='Elegí una sucursal para empezar.';return;}
@@ -78,6 +80,8 @@
             lines.forEach((line,i)=>ctx.fillText(line,0,(i-(lines.length-1)/2)*lineHeight));ctx.restore();
         }
         for(const i of selectedCells()){const x=i%map.cols,y=Math.floor(i/map.cols);ctx.fillStyle='rgba(199,120,46,.4)';ctx.fillRect(x*cell,y*cell,cell,cell);ctx.strokeStyle='#c7782e';ctx.lineWidth=2;ctx.strokeRect(x*cell+1,y*cell+1,cell-2,cell-2);}
+        window.MercadoBoundaries.draw(ctx,map,cell);
+        if(probeStart!==null&&el('boundary_mode').value==='probe'){ctx.strokeStyle='#7544b8';ctx.lineWidth=3;ctx.beginPath();for(const [n,i] of probePath.entries()){const x=(i%map.cols+.5)*cell,y=(Math.floor(i/map.cols)+.5)*cell;if(n)ctx.lineTo(x,y);else ctx.moveTo(x,y);}ctx.stroke();ctx.fillStyle='#7544b8';ctx.beginPath();ctx.arc((probeStart%map.cols+.5)*cell,(Math.floor(probeStart/map.cols)+.5)*cell,Math.max(2,cell*.15),0,Math.PI*2);ctx.fill();}
         if(!readOnly&&document.activeElement===canvas){ctx.strokeStyle='#c7782e';ctx.lineWidth=2;ctx.strokeRect(cursor.x*cell+1,cursor.y*cell+1,cell-2,cell-2);}
         el('resolution').textContent=map.rows+' filas × '+map.cols+' columnas · '+map.precision+'× de precisión por lado';
         updateInsertion();updateReduction();
@@ -104,8 +108,9 @@
         }catch(error){status('No se pudieron leer las sucursales: '+error.message);}
     };
     el('branch').onchange=()=>{
-        finish();branch=el('branch').value;assignmentCell=null;history=[];selection=null;cursor={x:0,y:0};map=null;
-        if(branch){try {const saved=localStorage.getItem(key(branch));map=saved?validate(JSON.parse(saved)):blank();status(saved?'Mapa recuperado de este dispositivo.':'Nuevo mapa de 16 × 16.');}catch(_){status('No se pudo abrir el mapa guardado. Conservamos sus datos; podés importar un respaldo.');}}
+        finish();probeStart=null;probePath=[];branch=el('branch').value;assignmentCell=null;history=[];selection=null;cursor={x:0,y:0};map=null;
+        status('');
+        if(branch){try {const saved=localStorage.getItem(key(branch));map=saved?validate(JSON.parse(saved)):blank();}catch(_){status('No se pudo abrir el mapa guardado. Conservamos sus datos; podés importar un respaldo.');}}
         render();document.dispatchEvent(new Event('mercado-map-open'));
         if(window.mercadoActiveBranch!==branch)void choosePurchaseBranch(branch);
     };
@@ -115,12 +120,13 @@
         finish();remember();const before=history[history.length-1];
         map.shelves=[];map.assignments={};selection=null;el('name').value='';
         if(!save()){map=JSON.parse(before);history.pop();render();return;}
-        render();status('Se quitaron todas las zonas. El dibujo se conservó. Podés usar Deshacer.');
+        render();notice('Se quitaron todas las zonas. El dibujo se conservó. Podés usar Deshacer.', {success:true});
     };
-    el('undo').onclick=()=>{if(history.length){map=JSON.parse(history.pop());selection=null;cursor.x=Math.min(cursor.x,map.cols-1);cursor.y=Math.min(cursor.y,map.rows-1);save();render();}};
+    el('undo').onclick=()=>{probeStart=null;probePath=[];if(history.length){map=JSON.parse(history.pop());selection=null;cursor.x=Math.min(cursor.x,map.cols-1);cursor.y=Math.min(cursor.y,map.rows-1);save();render();}};
     el('refine').onclick=()=>{
         if(!map||map.rows*2>128||map.cols*2>128||map.precision>=8)return;remember();const old=map,cols=old.cols*2,rows=old.rows*2;
-        selection=null;map={version:2,rows,cols,nextZone:old.nextZone,nextLetters:old.nextLetters,assignments:old.assignments,placements:Object.fromEntries(Object.entries(old.placements||{}).map(([id,p])=>[id,{...p,cell:Math.floor(p.cell/old.cols)*2*cols+(p.cell%old.cols)*2}])),shelves:old.shelves.map(g=>({...g,cells:g.cells.flatMap(i=>{const x=(i%old.cols)*2,y=Math.floor(i/old.cols)*2;return [y*cols+x,y*cols+x+1,(y+1)*cols+x,(y+1)*cols+x+1];})})),precision:old.precision*2,cells:Array.from({length:rows*cols},(_,i)=>old.cells[Math.floor(Math.floor(i/cols)/2)*old.cols+Math.floor((i%cols)/2)])};cursor.x*=2;cursor.y*=2;save();render();
+        const boundaries=window.MercadoBoundaries.transform(old,rows,cols,(x,y)=>[x*2,y*2],i=>{const x=i%old.cols*2,y=Math.floor(i/old.cols)*2;return [y*cols+x,y*cols+x+1,(y+1)*cols+x,(y+1)*cols+x+1];});
+        selection=null;map={...boundaries,version:2,rows,cols,nextZone:old.nextZone,nextLetters:old.nextLetters,assignments:old.assignments,placements:Object.fromEntries(Object.entries(old.placements||{}).map(([id,p])=>[id,{...p,cell:Math.floor(p.cell/old.cols)*2*cols+(p.cell%old.cols)*2}])),shelves:old.shelves.map(g=>({...g,cells:g.cells.flatMap(i=>{const x=(i%old.cols)*2,y=Math.floor(i/old.cols)*2;return [y*cols+x,y*cols+x+1,(y+1)*cols+x,(y+1)*cols+x+1];})})),precision:old.precision*2,cells:Array.from({length:rows*cols},(_,i)=>old.cells[Math.floor(Math.floor(i/cols)/2)*old.cols+Math.floor((i%cols)/2)])};cursor.x*=2;cursor.y*=2;save();render();
     };
     function updateInsertion() {
         const side=el('side').value,insert=side==='row'||side==='column';
@@ -131,11 +137,11 @@
     el('expand').onclick=()=>{
         if(!map)return;
         const count=Number(el('count').value),side=el('side').value,vertical=side==='top'||side==='bottom'||side==='row';
-        if(!Number.isInteger(count)||count<1||count>128){status('Ingresá una cantidad entera entre 1 y 128.');return;}
+        if(!Number.isInteger(count)||count<1||count>128){notice('Ingresá una cantidad entera entre 1 y 128.');return;}
         const rows=map.rows+(vertical?count:0),cols=map.cols+(vertical?0:count);
-        if(rows>128||cols>128){status('El mapa admite hasta 128 filas y 128 columnas.');return;}
+        if(rows>128||cols>128){notice('El mapa admite hasta 128 filas y 128 columnas.');return;}
         const insert=side==='row'||side==='column',position=Number(el('position').value),limit=vertical?map.rows:map.cols;
-        if(insert&&(!Number.isInteger(position)||position<1||position>limit+1)){status('Elegí una posición entre 1 y '+(limit+1)+'.');return;}
+        if(insert&&(!Number.isInteger(position)||position<1||position>limit+1)){notice('Elegí una posición entre 1 y '+(limit+1)+'.');return;}
         const at=insert?position-1:(side==='top'||side==='left'?0:limit);
         remember();const cells=Array(rows*cols).fill(0);
         for(let y=0;y<map.rows;y++)for(let x=0;x<map.cols;x++){
@@ -146,7 +152,8 @@
         if(!vertical&&cursor.x>=at)cursor.x+=count;
         const shelves=map.shelves.map(g=>({...g,cells:g.cells.map(i=>{const x=i%map.cols,y=Math.floor(i/map.cols);return (y+(vertical&&y>=at?count:0))*cols+x+(!vertical&&x>=at?count:0);})}));
         const placements=Object.fromEntries(Object.entries(map.placements||{}).map(([id,p])=>{const x=p.cell%map.cols,y=Math.floor(p.cell/map.cols);return [id,{...p,cell:(y+(vertical&&y>=at?count:0))*cols+x+(!vertical&&x>=at?count:0)}];}));
-        selection=null;map={...map,rows,cols,cells,shelves,placements};save();render();
+        const boundaries=window.MercadoBoundaries.transform(map,rows,cols,(x,y)=>[x+(!vertical&&x>=at?count:0),y+(vertical&&y>=at?count:0)],i=>{const x=i%map.cols,y=Math.floor(i/map.cols);return [(y+(vertical&&y>=at?count:0))*cols+x+(!vertical&&x>=at?count:0)];});
+        selection=null;map={...map,...boundaries,rows,cols,cells,shelves,placements};save();render();
     };
     function reduction(){
         if(!map)return null;
@@ -165,29 +172,47 @@
     }
     for(const id of ['reduce_side','reduce_count'])el(id).addEventListener(id==='reduce_count'?'input':'change',()=>{el('reduce_content').checked=false;updateReduction();});
     el('reduce').onclick=()=>{
-        const result=reduction();if(!result){status('La cantidad debe ser un entero positivo y debe quedar al menos una fila y una columna.');return;}
-        if(result.removed&&!el('reduce_content').checked){status('El recorte afecta contenido. Revisá el detalle en Reducir mapa y marcá la opción para recortarlo.');return;}
+        const result=reduction();if(!result){notice('La cantidad debe ser un entero positivo y debe quedar al menos una fila y una columna.');return;}
+        if(result.removed&&!el('reduce_content').checked){notice('El recorte afecta contenido. Revisá el detalle en Reducir mapa y marcá la opción para recortarlo.');return;}
         finish();remember();const before=history[history.length-1],cells=Array(result.rows*result.cols).fill(0);
         map.cells.forEach((value,i)=>{const target=result.remap(i);if(target!==null)cells[target]=value;});
         const shelves=map.shelves.map(g=>({...g,cells:g.cells.map(result.remap).filter(i=>i!==null)})).filter(g=>g.cells.length);
         map.placements=Object.fromEntries(Object.entries(map.placements||{}).filter(([,p])=>result.remap(p.cell)!==null).map(([id,p])=>[id,{...p,cell:result.remap(p.cell)}]));
-        map={...map,rows:result.rows,cols:result.cols,cells,shelves};selection=null;cursor={x:Math.max(0,Math.min(map.cols-1,cursor.x-result.dx)),y:Math.max(0,Math.min(map.rows-1,cursor.y-result.dy))};
+        const boundaries=window.MercadoBoundaries.transform(map,result.rows,result.cols,(x,y)=>[x-result.dx,y-result.dy],i=>[result.remap(i)]);
+        map={...map,...boundaries,rows:result.rows,cols:result.cols,cells,shelves};selection=null;cursor={x:Math.max(0,Math.min(map.cols-1,cursor.x-result.dx)),y:Math.max(0,Math.min(map.rows-1,cursor.y-result.dy))};
         el('reduce_content').checked=false;
         if(!save()){map=JSON.parse(before);history.pop();render();return;}
-        render();status('Mapa reducido a '+map.rows+' filas × '+map.cols+' columnas. Podés usar Deshacer.');
+        render();notice('Mapa reducido a '+map.rows+' filas × '+map.cols+' columnas. Podés usar Deshacer.', {success:true});
     };
     el('zoom').onchange=()=>{el('phone_zoom').value=el('zoom').value;render();};
     el('phone_zoom').onchange=()=>{el('zoom').value=el('phone_zoom').value;render();};
     let resizeTimer;window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(map&&!document.getElementById('panel-maps').hidden)render();},100);});
+
+    function editBoundary(cell,side){
+        const tool=el('boundary_mode').value,B=window.MercadoBoundaries;
+        if(tool==='probe'){
+            if(probeStart===null){if(map.cells[cell]){el('boundary_status').textContent='Elegí espacio libre como inicio.';return;}probeStart=cell;probePath=[cell];render();el('boundary_status').textContent='Ahora tocá una góndola o un destino libre para probar el camino.';return;}
+            const destinations=map.cells[cell]?B.accessCells(map,cell):[cell];probePath=destinations.map(end=>B.path(map,probeStart,end)).filter(p=>p.length).sort((a,b)=>a.length-b.length)[0]||[];render();el('boundary_status').textContent=probePath.length?'Camino posible: '+(probePath.length-1)+' pasos de grilla. Cambiá de herramienta y volvé para elegir otro inicio.':'Sin acceso desde ese inicio. Revisá paredes y lados habilitados.';return;
+        }
+        probePath=[];probeStart=null;
+        if((tool==='access'||tool==='auto')&&!map.cells[cell]){notice('Elegí un borde de una celda de góndola.');return;}
+        remember();const before=history[history.length-1];
+        if(tool==='wall'){const key=B.edge(map,cell,side),walls=new Set(map.walls||[]);if(walls.has(key))walls.delete(key);else walls.add(key);map.walls=[...walls].sort();}
+        else if(tool==='auto'){map.access??={};const zone=map.shelves.find(g=>g.cells.includes(cell));for(const target of el('boundary_zone').checked&&zone?zone.cells:[cell])delete map.access[target];}
+        else {map.access??={};const list=new Set(map.access[cell]??B.sides);if(list.has(side))list.delete(side);else list.add(side);const zone=map.shelves.find(g=>g.cells.includes(cell)),targets=el('boundary_zone').checked&&zone?zone.cells:[cell];for(const target of targets)map.access[target]=B.sides.filter(s=>list.has(s));}
+        if(!save()){map=JSON.parse(before);history.pop();render();return;}
+        render();el('boundary_status').textContent=tool==='wall'?'Rojo: no se puede cruzar.':'Azul: acceso habilitado. Ocre: acceso deshabilitado. Sin marcas: acceso automático.';
+    }
+    el('boundary_mode').onchange=()=>{finish();selection=null;probeStart=null;probePath=[];el('boundary_status').textContent=el('boundary_mode').value==='off'?'Edición de límites desactivada.':el('boundary_mode').value==='probe'?'Elegí un espacio libre como inicio para probar accesos.':'Tocá el borde que quieras cambiar. Con teclado: movete con flechas, elegí Lado y pulsá espacio.';render();};
     function paint(x,y){const i=y*map.cols+x;if(selecting){if(map.cells[i]&&!visited.has(i)){visited.add(i);if(selection.has(i))selection.delete(i);else selection.add(i);}return;}if(!visited.has(i)){visited.add(i);map.cells[i]=1-map.cells[i];if(!map.cells[i])map.shelves=map.shelves.map(g=>({...g,cells:g.cells.filter(c=>c!==i)})).filter(g=>g.cells.length);changed=true;}}
     function point(event){const r=canvas.getBoundingClientRect();return {x:Math.max(0,Math.min(map.cols-1,Math.floor((event.clientX-r.left)/r.width*map.cols))),y:Math.max(0,Math.min(map.rows-1,Math.floor((event.clientY-r.top)/r.height*map.rows)))};}
     function stroke(p){if(last){let x=last.x,y=last.y,dx=Math.abs(p.x-x),dy=-Math.abs(p.y-y),sx=x<p.x?1:-1,sy=y<p.y?1:-1,err=dx+dy;while(true){paint(x,y);if(x===p.x&&y===p.y)break;const e=2*err;if(e>=dy){err+=dy;x+=sx;}if(e<=dx){err+=dx;y+=sy;}}}else paint(p.x,p.y);last=p;cursor=p;render();}
     function finish(){if(selecting){selecting=false;last=null;render();return;}if(selectionStart){selectionStart=null;render();return;}if(!drawing)return;drawing=false;last=null;if(changed)save();else history.pop();changed=false;render();}
-    canvas.onpointerdown=event=>{if(readOnly||!map||event.button!==0||drawing)return;event.preventDefault();canvas.focus({preventScroll:true});canvas.setPointerCapture(event.pointerId);if(mode==='name'){if(el('selection_tool').value==='cells'){if(!(selection instanceof Set))selection=new Set();visited.clear();selecting=true;last=null;stroke(point(event));return;}selectionStart=point(event);selection={x:selectionStart.x,y:selectionStart.y,w:1,h:1};render();return;}remember();visited.clear();drawing=true;changed=false;stroke(point(event));};
+    canvas.onpointerdown=event=>{if(readOnly||!map||event.button!==0||drawing)return;event.preventDefault();canvas.focus({preventScroll:true});if(el('boundary_mode').value!=='off'){const p=point(event),r=canvas.getBoundingClientRect(),fx=(event.clientX-r.left)/r.width*map.cols-p.x,fy=(event.clientY-r.top)/r.height*map.rows-p.y;const side=[['west',fx],['east',1-fx],['north',fy],['south',1-fy]].sort((a,b)=>a[1]-b[1])[0][0];cursor=p;editBoundary(p.y*map.cols+p.x,side);return;}canvas.setPointerCapture(event.pointerId);if(mode==='name'){if(el('selection_tool').value==='cells'){if(!(selection instanceof Set))selection=new Set();visited.clear();selecting=true;last=null;stroke(point(event));return;}selectionStart=point(event);selection={x:selectionStart.x,y:selectionStart.y,w:1,h:1};render();return;}remember();visited.clear();drawing=true;changed=false;stroke(point(event));};
     canvas.onpointermove=event=>{if(selecting){stroke(point(event));return;}if(selectionStart){const p=point(event);selection={x:Math.min(p.x,selectionStart.x),y:Math.min(p.y,selectionStart.y),w:Math.abs(p.x-selectionStart.x)+1,h:Math.abs(p.y-selectionStart.y)+1};cursor=p;render();return;}if(drawing)stroke(point(event));};
     canvas.onpointerup=finish;canvas.onpointercancel=finish;canvas.onlostpointercapture=finish;
     canvas.onfocus=render;canvas.onblur=render;
-    canvas.onkeydown=event=>{if(readOnly||!map)return;const moves={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};if(moves[event.key]){event.preventDefault();cursor.x=Math.max(0,Math.min(map.cols-1,cursor.x+moves[event.key][0]));cursor.y=Math.max(0,Math.min(map.rows-1,cursor.y+moves[event.key][1]));render();}else if(event.key===' '||event.key==='Enter'){event.preventDefault();if(mode==='name'){if(el('selection_tool').value==='cells'){if(!(selection instanceof Set))selection=new Set();selecting=true;visited.clear();paint(cursor.x,cursor.y);selecting=false;}else selection={x:cursor.x,y:cursor.y,w:1,h:1};render();return;}remember();visited.clear();paint(cursor.x,cursor.y);save();render();}};
+    canvas.onkeydown=event=>{if(readOnly||!map)return;const moves={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};if(moves[event.key]){event.preventDefault();cursor.x=Math.max(0,Math.min(map.cols-1,cursor.x+moves[event.key][0]));cursor.y=Math.max(0,Math.min(map.rows-1,cursor.y+moves[event.key][1]));render();}else if(event.key===' '||event.key==='Enter'){event.preventDefault();if(el('boundary_mode').value!=='off'){editBoundary(cursor.y*map.cols+cursor.x,el('boundary_side').value);return;}if(mode==='name'){if(el('selection_tool').value==='cells'){if(!(selection instanceof Set))selection=new Set();selecting=true;visited.clear();paint(cursor.x,cursor.y);selecting=false;}else selection={x:cursor.x,y:cursor.y,w:1,h:1};render();return;}remember();visited.clear();paint(cursor.x,cursor.y);save();render();}};
     function selectedCells(){
         if(!map||!selection)return [];
         if(selection instanceof Set)return [...selection].filter(i=>map.cells[i]);
@@ -204,12 +229,12 @@
     el('name_cancel').onclick=()=>{selection=null;el('name').value='';render();};
     el('name_save').onclick=()=>{
         if(!map||!selection)return;let name=el('name').value.trim();
-        if(name.length>60){status('El nombre admite hasta 60 caracteres.');return;}
+        if(name.length>60){notice('El nombre admite hasta 60 caracteres.');return;}
         const cells=selectedCells();
-        if(!cells.length){status('Seleccioná celdas de góndola para formar la región.');return;}
+        if(!cells.length){notice('Seleccioná celdas de góndola para formar la región.');return;}
         const existing=map.shelves.find(g=>nameKey(g.name)===nameKey(name));
         const selected=new Set(cells);
-        if(map.shelves.some(g=>g!==existing&&g.cells.some(i=>selected.has(i)))){status('La selección incluye celdas de otra zona. Quitalas de la selección para extender esta zona.');return;}
+        if(map.shelves.some(g=>g!==existing&&g.cells.some(i=>selected.has(i)))){notice('La selección incluye celdas de otra zona. Quitalas de la selección para extender esta zona.');return;}
         remember();
         if(existing)existing.cells=[...new Set([...existing.cells,...cells])];
         else {name=el('auto_series').checked&&!name.split(/[&\n]/).some(p=>p.trim())?seriesName(true):zoneName(name);map.shelves.push({id:crypto.randomUUID(),name,orientation:el('orientation').value,color:el('color').value,cells});}
@@ -233,7 +258,7 @@
         remember();const before=history[history.length-1],letter=el('series_letter').value;
         map.nextLetters??={};map.nextLetters[letter]=1;
         if(!save()){map=JSON.parse(before);history.pop();render();return;}
-        render();status('Numeración '+letter+' reiniciada. Siguiente: '+seriesName()+'. Se omiten los nombres que ya existen. Podés usar Deshacer.');
+        render();notice('Numeración '+letter+' reiniciada. Siguiente: '+seriesName()+'. Se omiten los nombres que ya existen. Podés usar Deshacer.', {success:true});
     };
     for(const id of ['auto_series','series_letter','keep_orientation','orientation'])el(id).addEventListener('change',()=>{saveLabelPreferences();updateSeriesPreview();});
     function nameKey(name){return name.normalize('NFC').split(/[&\n]/).map(part=>part.trim().replace(/\s+/g,' ')).filter(Boolean).join(' & ').toLocaleLowerCase('es');}
@@ -289,20 +314,20 @@
         input.oninput=track;for(const control of [color,orientation,entry])control.onchange=track;track();
         rename.onclick=()=>{
             if(rename.disabled)return;
-            const name=draft.name.trim();if(name.length>60){status('El nombre admite hasta 60 caracteres.');return;}
-            if(JSON.stringify(g)!==draft.original||map.shelves.map(zone=>zone.id).join('|')!==draft.order){status('La zona cambió mientras la editabas. Descartá el borrador para cargar los datos vigentes.');return;}
+            const name=draft.name.trim();if(name.length>60){notice('El nombre admite hasta 60 caracteres.');return;}
+            if(JSON.stringify(g)!==draft.original||map.shelves.map(zone=>zone.id).join('|')!==draft.order){notice('La zona cambió mientras la editabas. Descartá el borrador para cargar los datos vigentes.');return;}
             remember();const before=history[history.length-1];
             const existing=map.shelves.find(other=>other!==g&&nameKey(other.name)===nameKey(name)),target=existing||g;
             if(existing){existing.cells=[...new Set([...existing.cells,...g.cells])];map.assignments=Object.fromEntries(Object.entries(map.assignments||{}).map(([id,zone])=>[id,zone===g.id?existing.id:zone]));map.shelves=map.shelves.filter(other=>other!==g);activeShelf=existing.id;}else g.name=zoneName(name);
             Object.assign(target,{color:draft.color,orientation:draft.orientation,entry:draft.entry});map.shelves=map.shelves.filter(zone=>zone!==target);map.shelves.splice(Math.min(draft.index,map.shelves.length),0,target);
             if(!save()){map=JSON.parse(before);history.pop();render();return;}
-            zoneEdits.delete(editKey);render();status('Cambios de la zona guardados.');
+            zoneEdits.delete(editKey);render();notice('Cambios de la zona guardados.', {success:true});
         };
         const remove=document.createElement('button');remove.type='button';remove.textContent='Quitar nombre';remove.onclick=()=>{remember();map.shelves=map.shelves.filter(s=>s.id!==g.id);activeShelf=null;save();render();};
         row.append(input,color,orientation,rename,discard,remove);editor.append(row);
     }
     el('export').onclick=()=>{if(!map)return;const url=URL.createObjectURL(new Blob([JSON.stringify(map)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download='mercado-mapa-'+branch+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
-    el('import').onchange=async event=>{const file=event.target.files[0],target=branch;if(!file||!map)return;try{if(file.size>2000000)throw Error('El archivo es demasiado grande');const imported=validate(JSON.parse(await file.text()));if(branch!==target)return;remember();map=imported;selection=null;cursor={x:0,y:0};save();render();}catch(error){status(error.message);}finally{event.target.value='';}};
+    el('import').onchange=async event=>{const file=event.target.files[0],target=branch;if(!file||!map)return;try{if(file.size>2000000)throw Error('El archivo es demasiado grande');const imported=validate(JSON.parse(await file.text()));if(branch!==target)return;remember();map=imported;selection=null;cursor={x:0,y:0};save();render();}catch(error){notice(error.message);}finally{event.target.value='';}};
     window.mercadoMapProducts={
         saveOrder:(expectedBranch,zone,baseline,ordered)=>{
             if(!map||branch!==expectedBranch)return false;
@@ -338,12 +363,12 @@
         receive:(id,value)=>{
             if(branch!==id)return;
             if(drawing||selecting||selectionStart||selection||document.activeElement?.matches('#map_shelves textarea,#map_name'))return;
-            map=validate(value);history=[];cursor={x:Math.min(cursor.x,map.cols-1),y:Math.min(cursor.y,map.rows-1)};render();
+            probeStart=null;probePath=[];map=validate(value);history=[];cursor={x:Math.min(cursor.x,map.cols-1),y:Math.min(cursor.y,map.rows-1)};render();
         },
         context:()=>({branch,ready:!!map,cols:map?.cols||0,placements:structuredClone(map?.placements||{}),zones:map?map.shelves.map(g=>({id:g.id,name:g.name,color:g.color,entry:g.entry||'first',cells:[...g.cells].sort((a,b)=>a-b)})):[],assignments:{...(map?.assignments||{})}}),
         assign:async(expectedBranch,productIds,zone)=>{
             if(!map||branch!==expectedBranch||!productIds.length||zone&&!map.shelves.some(g=>g.id===zone))return false;
-            if(zone){try{await window.MercadoAvailability.set(expectedBranch,productIds,'available');}catch(error){status('No se pudo guardar la disponibilidad: '+error.message);return false;}}
+            if(zone){try{await window.MercadoAvailability.set(expectedBranch,productIds,'available');}catch(error){notice('No se pudo guardar la disponibilidad: '+error.message);return false;}}
             if(!map||branch!==expectedBranch)return false;
             remember();const before=history[history.length-1];
             for(const id of productIds){if(map.assignments[id]!==zone&&map.placements)delete map.placements[id];if(zone)map.assignments[id]=zone;else delete map.assignments[id];}

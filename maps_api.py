@@ -35,11 +35,21 @@ class GridMap(BaseModel):
     shelves: list[Region]=Field(default_factory=list,max_length=16384)
     assignments: dict[str,str]=Field(default_factory=dict)
     placements: dict[str,Placement]=Field(default_factory=dict)
+    walls: list[str]=Field(default_factory=list,max_length=33024)
+    access: dict[str,list[Literal['north','east','south','west']]]=Field(default_factory=dict)
 
     @model_validator(mode='after')
     def valid_grid(self):
         if any(not re.fullmatch(r'[A-ZÑ]',letter) or number<1 or number>9007199254740991 for letter,number in self.nextLetters.items()): raise ValueError('Numeración de zonas inválida')
         if len(self.cells)!=self.rows*self.cols: raise ValueError('Dimensiones del mapa inválidas')
+        if len(set(self.walls))!=len(self.walls): raise ValueError('Límites repetidos')
+        for edge in self.walls:
+            match=re.fullmatch(r'(h|v):(0|[1-9]\d*):(0|[1-9]\d*)',edge)
+            if not match: raise ValueError('Límite inválido')
+            axis,x,y=match[1],int(match[2]),int(match[3])
+            if not (x<self.cols and y<=self.rows if axis=='h' else x<=self.cols and y<self.rows): raise ValueError('Límite fuera del mapa')
+        for cell,sides in self.access.items():
+            if not re.fullmatch(r'0|[1-9]\d*',cell) or int(cell)>=len(self.cells) or self.cells[int(cell)]!=1 or len(set(sides))!=len(sides): raise ValueError('Acceso de góndola inválido')
         ids=set();occupied=set()
         for region in self.shelves:
             if not region.name.strip() or region.id in ids: raise ValueError('Zona inválida o repetida')
@@ -71,7 +81,7 @@ def connection():
 @router.get('')
 def snapshot():
     with connection() as db:
-        return {'features':['placements','region_entry'],'maps':[{'branch_id':r['branch_id'],'revision':r['revision'],'map':json.loads(r['payload'])} for r in db.execute('SELECT * FROM grid_maps')]}
+        return {'features':['placements','region_entry','boundaries'],'maps':[{'branch_id':r['branch_id'],'revision':r['revision'],'map':json.loads(r['payload'])} for r in db.execute('SELECT * FROM grid_maps')]}
 
 @router.put('/{branch_id}')
 def update(branch_id:UUID,body:Update):
